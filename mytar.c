@@ -73,31 +73,29 @@ struct TarHeader
 
 
 struct TarHeader
-read_header(FILE* fp, char* name)
+read_header(FILE* fp)
 {
 	struct TarHeader header;
     // reset fp for good measure
     fseek(fp, 0, SEEK_SET);
-    char* buffer = malloc(NAME_LENGTH + 1);
-	memset(buffer, '\0', NAME_LENGTH + 1);
     
 	//read name
-    size_t read = fread(&buffer, sizeof(char), NAME_LENGTH, fp);
+	char name[NAME_LENGTH + 1] = {0};
+    size_t read = fread(name, sizeof(name[0]), NAME_LENGTH, fp);
     if (read != NAME_LENGTH)
 	{
 		err(1, "Error reading name");
 	}
-	strcpy(header.name, buffer); // note: safe - buffer[100] is always a null byte
+	strcpy(header.name, name); // note: safe - buffer[100] is always a null byte
 	//read length
+	char size[SIZE_LENGTH + 1] = {0};
 	fseek(fp, SIZE_OFFSET - NAME_LENGTH, SEEK_CUR);
-	buffer[SIZE_LENGTH] = '\0';
-	size_t read = fread(&buffer, sizeof(char), SIZE_LENGTH, fp);
+	read = fread(size, sizeof(char), SIZE_LENGTH, fp);
 	if (read != SIZE_LENGTH)
 	{
 		err(1, "Error reading size");
 	}
-	size_t size = (size_t)strtoull(buffer, NULL, 8);
-	header.size = size;
+	header.size = (size_t)strtoull(size, NULL, 8);
 	return header;
 }
 
@@ -109,9 +107,16 @@ main(int argc, char* argv[])
     {
         printf("%s\n", "Provided arguments are not valid");
     }
-
-    FILE* fp = fopen(args.output_file, "w");
-    prepend_head(fp); 
 	printf("Output file: %s\n", args.output_file);
 	printf("Should list: %s\n", args.should_list ? "true" : "false");
+
+    FILE* fp;
+	if ((fp = fopen(args.output_file, "r")) == NULL)
+	{
+		err(1, "fopen");
+	}
+    struct TarHeader header = read_header(fp);
+
+	printf("Filename: %s\n", header.name);
+	printf("Size: %zu\n", header.size);
 }
