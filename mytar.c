@@ -22,7 +22,6 @@
 #define TRAILING_PADDING 12
 #define RECORD_SIZE 512
 
-#define ERR -1
 #define DEBUG true
 
 /* Argument parsing */
@@ -60,7 +59,7 @@ struct Args parse_arguments(int argc, char** argv)
 		    		last_option = Filename;
 		    		break;
 				default:
-		    		err(1, "Unknown flag");
+					errx(2, "Unknown option: %s", argv[i]);
 			}
 			continue;
 	    }
@@ -75,7 +74,7 @@ struct Args parse_arguments(int argc, char** argv)
                 parsed.is_valid = true;
 				break;
 			default:
-				err(1, "Unknown option");
+				errx(2, "Unknown option: %s", argv[i]);
 		}
 	}
 
@@ -85,20 +84,20 @@ struct Args parse_arguments(int argc, char** argv)
 struct TarHeader
 {
 	char name[NAME_LENGTH + 1];
-	int mode;
-	int uid;
-	int gid;
-	int size;
-	int mtime;
-	int chksum;
+	size_t mode;
+	size_t uid;
+	size_t gid;
+	size_t size;
+	size_t mtime;
+	size_t chksum;
 	char typeflag;
 	char linkname[LINKNAME_LENGTH + 1];
 	char magic[MAGIC_LENGTH + 1];
 	char version[VERSION_LENGTH + 1];
 	char uname[UNAME_LENGTH + 1];
 	char gname[GNAME_LENGTH + 1];
-	int devmajor;
-	int devminor;
+	size_t devmajor;
+	size_t devminor;
 	char prefix[PREFIX_LENGTH + 1];
 };
 
@@ -111,14 +110,26 @@ read_char_based(FILE* fp, char* buffer, size_t size)
 	return true;
 }
 
-int
-read_integer_based(FILE* fp, size_t size)
+size_t
+read_integer_based(FILE* fp, size_t size, bool* ok)
 {
 	char buffer[size];
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
-	if (read != size)
-		return ERR;
-	return strtol(buffer, NULL, 8);
+	if (read != size) {
+		*ok = false;
+		return 0ULL;
+	}
+
+	int first_bit_mask = 0b10000000;
+	// Files over 8G extension (star(1) extension)
+	if ((buffer[0] & first_bit_mask) == first_bit_mask) {
+		// represented in base 256
+		buffer[0] &= 0b01111111;  // clear the sign bit
+		printf("Base 256\n");
+		return strtoull(buffer, NULL, 256);
+	}
+	// represented in octal
+	return strtoull(buffer, NULL, 8);
 }
 
 char
@@ -127,99 +138,105 @@ read_char(FILE* fp)
 	char c;
 	size_t read = fread(&c, sizeof(char), 1, fp);
 	if (read != 1)
-		err(1, "read_char");
+		err(2, "read_char");
 	return c;
 }
 
 void
 read_header(FILE* fp, struct TarHeader* header)
 {
+	bool ok = true;
 	// Read name
 	if (!read_char_based(fp, header->name, NAME_LENGTH))
-		err(1, "read_name");
+		err(2, "read_name");
 	// Read mode
-	header->mode = read_integer_based(fp, MODE_LENGTH);
-	if (header->mode == ERR)
-		err(1, "read_mode");
+	header->mode = read_integer_based(fp, MODE_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_mode");
 	// Read uid
-	header->uid = read_integer_based(fp, UID_LENGTH);
-	if (header->uid == ERR)
-		err(1, "read_uid");
+	header->uid = read_integer_based(fp, UID_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_uid");
 	// Read gid
-	header->gid = read_integer_based(fp, GID_LENGTH);
-	if (header->gid == ERR)
-		err(1, "read_gid");
+	header->gid = read_integer_based(fp, GID_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_gid");
 	// Read size
-	header->size = read_integer_based(fp, SIZE_LENGTH);
-	if (header->size == ERR)
-		err(1, "read_size");
+	header->size = read_integer_based(fp, SIZE_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_size");
 	// Read mtime
-	header->mtime = read_integer_based(fp, MTIME_LENGTH);
-	if (header->mtime == ERR)
-		err(1, "read_mtime");
+	header->mtime = read_integer_based(fp, MTIME_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_mtime");
 	// Read chksum
-	header->chksum = read_integer_based(fp, CHKSUM_LENGTH);
-	if (header->chksum == ERR)
-		err(1, "read_chksum");
+	header->chksum = read_integer_based(fp, CHKSUM_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_chksum");
 	// Read typeflag
 	header->typeflag = read_char(fp);
+	if (header->typeflag != '0' && header->typeflag != '\0') // supporting only regular files
+		errx(2, "Unsupported header type: %d", header->typeflag);
 	// Read linkname
 	if (!read_char_based(fp, header->linkname, LINKNAME_LENGTH))
-		err(1, "read_linkname");
+		err(2, "read_linkname");
 	header->linkname[LINKNAME_LENGTH] = '\0';
 	// Read magic
 	if (!read_char_based(fp, header->magic, MAGIC_LENGTH))
-		err(1, "read_magic");
+		err(2, "read_magic");
 	header->magic[MAGIC_LENGTH] = '\0';
 	// Read version
 	if (!read_char_based(fp, header->version, VERSION_LENGTH))
-		err(1, "read_version");
+		err(2, "read_version");
 	header->version[VERSION_LENGTH] = '\0';
 	// Read uname
 	if (!read_char_based(fp, header->uname, UNAME_LENGTH))
-		err(1, "read_uname");
+		err(2, "read_uname");
 	header->uname[UNAME_LENGTH] = '\0';
 	// Read gname
 	if (!read_char_based(fp, header->gname, GNAME_LENGTH))
-		err(1, "read_gname");
+		err(2, "read_gname");
 	header->gname[GNAME_LENGTH] = '\0';
 	// Read devmajor
-	header->devmajor = read_integer_based(fp, DEVMAJOR_LENGTH);
-	if (header->devmajor == ERR)
-		err(1, "read_devmajor");
+	header->devmajor = read_integer_based(fp, DEVMAJOR_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_devmajor");
 	// Read devminor
-	header->devminor = read_integer_based(fp, DEVMINOR_LENGTH);
-	if (header->devminor == ERR)
-		err(1, "read_devminor");
+	header->devminor = read_integer_based(fp, DEVMINOR_LENGTH, &ok);
+	if (!ok)
+		err(2, "read_devminor");
 	// Read prefix
 	if (!read_char_based(fp, header->prefix, PREFIX_LENGTH))
-		err(1, "read_prefix");
+		err(2, "read_prefix");
 	header->prefix[PREFIX_LENGTH] = '\0';
 
 	// Skip traling header
 	char void_buffer[TRAILING_PADDING];  // will be thrown away
 	if (!read_char_based(fp, void_buffer, TRAILING_PADDING))
-		err(1, "read_trailing_header");
+		err(2, "read_trailing_header");
 }
 
 void print_header(struct TarHeader* header)
 {
-	printf("Name: %s\n", header->name);
+	if (header->prefix[0] != '\0') {
+		printf("%s/", header->prefix);
+	}
+	printf("%s\n", header->name);
 	if (DEBUG) {
-		printf("Mode: %d\n", header->mode);
-		printf("UID: %d\n", header->uid);
-		printf("GID: %d\n", header->gid);
-		printf("Size: %d\n", header->size);
-		printf("MTIME: %d\n", header->mtime);
-		printf("CHKSUM: %d\n", header->chksum);
+		printf("Mode: %zu\n", header->mode);
+		printf("UID: %zu\n", header->uid);
+		printf("GID: %zu\n", header->gid);
+		printf("Size: %zu\n", header->size);
+		printf("MTIME: %zu\n", header->mtime);
+		printf("CHKSUM: %zu\n", header->chksum);
 		printf("Typeflag: %c\n", header->typeflag);
 		printf("Linkname: %s\n", header->linkname);
 		printf("Magic: %s\n", header->magic);
 		printf("Version: %s\n", header->version);
 		printf("Uname: %s\n", header->uname);
 		printf("Gname: %s\n", header->gname);
-		printf("Devmajor: %d\n", header->devmajor);
-		printf("Devminor: %d\n", header->devminor);
+		printf("Devmajor: %zu\n", header->devmajor);
+		printf("Devminor: %zu\n", header->devminor);
 		printf("Prefix: %s\n", header->prefix);
 	}
 }
@@ -299,7 +316,8 @@ main(int argc, char* argv[])
 {
     struct Args args = parse_arguments(argc, argv);
     if (!args.is_valid) {
-        printf("%s\n", "Provided arguments are not valid");
+        errx(2, "%s", "Provided arguments are not valid");
+		return 1;
 	}
 
 	if (DEBUG) {
@@ -310,7 +328,7 @@ main(int argc, char* argv[])
 
     FILE* fp;
 	if ((fp = fopen(args.output_file, "r")) == NULL)
-		err(1, "fopen");
+		err(2, "fopen");
 
 	if (args.should_list)
 		list_archive(fp);
