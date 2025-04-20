@@ -118,7 +118,7 @@ read_integer_based(FILE* fp, size_t size)
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
 	if (read != size)
 		return ERR;
-	return atoi(buffer);
+	return strtol(buffer, NULL, 8);
 }
 
 char
@@ -244,16 +244,22 @@ is_end_of_archive(FILE* fp, struct TarHeader* header)
 {
 	// End of archive is defined by the standard as two consecutive empty records (headers)
 	if (is_header_empty(header)) {
+		if (DEBUG) {
+			printf("First record empty\n");
+		}
 		// The first record is empty, check the next one
 		read_header(fp, header);
 		if (is_header_empty(header)) {
+			if (DEBUG) {
+				printf("Second record empty\n");
+			}
 			// The second record is also empty, we reached the end of the archive
 			return true;
 		}
 		// The second record is not empty
 		// Print the first archive to the console
 		if (DEBUG) {
-			printf("First record empty, second record not empty\n");
+			printf("Second record NOT empty\n");
 		}
 		struct TarHeader empty_header = {0};
 		print_header(&empty_header);
@@ -266,7 +272,6 @@ void
 list_archive(FILE* fp)
 {
 	fseek(fp, 0, SEEK_SET);
-	// Read filename
 	struct TarHeader read;
 	
 	while (read_header(fp, &read), !is_end_of_archive(fp, &read))
