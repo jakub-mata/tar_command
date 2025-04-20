@@ -34,13 +34,19 @@ For example:
 	-t -f mytar
 	-f mytar -t -f mytar2
 */
-struct Args { bool is_valid; char* output_file; bool should_list; };
+struct Args { bool is_valid; char* output_file; char** members; int member_count; bool should_list; };
 
 enum ArgOption { Filename = 0 };
 
 struct Args parse_arguments(int argc, char** argv)
 {
-    struct Args parsed = {.is_valid = false, .output_file = "default.tar", .should_list = false};
+    struct Args parsed = {
+		.is_valid = false, 
+		.output_file = "default.tar", 
+		.should_list = false,
+		.members = NULL,
+		.member_count = 0
+	};
     bool last_arg_setup = false;
     enum ArgOption last_option = Filename;
 
@@ -74,7 +80,16 @@ struct Args parse_arguments(int argc, char** argv)
                 parsed.is_valid = true;
 				break;
 			default:
+				if (parsed.should_list) {
+					parsed.members = realloc(parsed.members, sizeof(char*) * (parsed.member_count + 1));
+					if (parsed.members == NULL)
+						err(2, "realloc");
+					parsed.members[parsed.member_count] = argv[i];
+					parsed.member_count++;
+					break;
+				}
 				errx(2, "Unknown option: %s", argv[i]);
+				break;
 		}
 	}
 
@@ -286,7 +301,7 @@ is_end_of_archive(FILE* fp, struct TarHeader* header)
 }
 
 void
-list_archive(FILE* fp)
+list_archive(FILE* fp, struct Args* args)
 {
 	fseek(fp, 0, SEEK_SET);
 	struct TarHeader read;
@@ -296,7 +311,18 @@ list_archive(FILE* fp)
 		if (DEBUG) {
 			printf("**********\n");
 		}
-		print_header(&read);
+
+		bool should_print = (args->member_count == 0);
+		for (int i = 0; i < args->member_count; ++i) {
+			if (strcmp(read.name, args->members[i]) == 0) {
+				should_print = true;
+				break;
+			}
+		}
+		if (should_print) {
+			print_header(&read);
+		}
+
 		// Skip file data and advance to the next header
 		size_t data_record_amount = (RECORD_SIZE - 1 + read.size) / RECORD_SIZE;  // defined by standard
 		if (DEBUG) {
@@ -331,5 +357,5 @@ main(int argc, char* argv[])
 		err(2, "fopen");
 
 	if (args.should_list)
-		list_archive(fp);
+		list_archive(fp, &args);
 }
