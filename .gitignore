@@ -53,3 +53,5 @@ dkms.conf
 
 # Test files
 *.tar
+
+.vscode
