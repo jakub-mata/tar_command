@@ -131,7 +131,7 @@ struct TarHeader
 	char prefix[PREFIX_LENGTH + 1];
 };
 
-bool
+void
 read_char_based(FILE* fp, char* buffer, size_t size)
 {
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
@@ -139,9 +139,9 @@ read_char_based(FILE* fp, char* buffer, size_t size)
 		if (feof(fp))
 			errx(2, "Unexpected EOF in archive");
 		else
-			return false;
+			errx(2, "read_char_based");
 	}
-	return true;
+	return;
 }
 
 size_t
@@ -184,13 +184,41 @@ read_char(FILE* fp)
 	return c;
 }
 
-void
-read_header(FILE* fp, struct TarHeader* header)
+bool
+check_EOF(FILE* fp)
 {
+	char c;
+	size_t read = fread(&c, sizeof(char), 1, fp);
+	if (read == 0) {
+		if (feof(fp))
+			return true;
+		else
+			errx(2, "check_EOF");
+	}
+	if (read == 1) {
+		ungetc(c, fp);  // put the character back
+		return false;
+	}
+	errx(2, "check_EOF");
+}
+
+/**
+ * Reads a tar header from the file pointer.
+ * Returns true if the header was read successfully, false if EOF reached at first character.
+ */
+void
+read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
+{
+	if (check_EOF(fp)) {
+		if (DEBUG)
+			printf("Unexpected EOF\n");
+		*EOF_reached = true;
+		return;
+	}
 	bool ok = true;
 	// Read name
-	if (!read_char_based(fp, header->name, NAME_LENGTH))
-		err(2, "read_name");
+	read_char_based(fp, header->name, NAME_LENGTH);
+	header->name[NAME_LENGTH] = '\0';
 	// Read mode
 	header->mode = read_integer_based(fp, MODE_LENGTH, &ok);
 	if (!ok)
@@ -220,24 +248,19 @@ read_header(FILE* fp, struct TarHeader* header)
 	if (header->typeflag != '0' && header->typeflag != '\0') // supporting only regular files
 		errx(2, "Unsupported header type: %d", header->typeflag);
 	// Read linkname
-	if (!read_char_based(fp, header->linkname, LINKNAME_LENGTH))
-		err(2, "read_linkname");
+	read_char_based(fp, header->linkname, LINKNAME_LENGTH);
 	header->linkname[LINKNAME_LENGTH] = '\0';
 	// Read magic
-	if (!read_char_based(fp, header->magic, MAGIC_LENGTH))
-		err(2, "read_magic");
+	read_char_based(fp, header->magic, MAGIC_LENGTH);
 	header->magic[MAGIC_LENGTH] = '\0';
 	// Read version
-	if (!read_char_based(fp, header->version, VERSION_LENGTH))
-		err(2, "read_version");
+	read_char_based(fp, header->version, VERSION_LENGTH);
 	header->version[VERSION_LENGTH] = '\0';
 	// Read uname
-	if (!read_char_based(fp, header->uname, UNAME_LENGTH))
-		err(2, "read_uname");
+	read_char_based(fp, header->uname, UNAME_LENGTH);
 	header->uname[UNAME_LENGTH] = '\0';
 	// Read gname
-	if (!read_char_based(fp, header->gname, GNAME_LENGTH))
-		err(2, "read_gname");
+	read_char_based(fp, header->gname, GNAME_LENGTH);
 	header->gname[GNAME_LENGTH] = '\0';
 	// Read devmajor
 	header->devmajor = read_integer_based(fp, DEVMAJOR_LENGTH, &ok);
@@ -248,14 +271,12 @@ read_header(FILE* fp, struct TarHeader* header)
 	if (!ok)
 		err(2, "read_devminor");
 	// Read prefix
-	if (!read_char_based(fp, header->prefix, PREFIX_LENGTH))
-		err(2, "read_prefix");
+	read_char_based(fp, header->prefix, PREFIX_LENGTH);
 	header->prefix[PREFIX_LENGTH] = '\0';
 
 	// Skip traling header
 	char void_buffer[TRAILING_PADDING];  // will be thrown away
-	if (!read_char_based(fp, void_buffer, TRAILING_PADDING))
-		err(2, "read_trailing_header");
+	read_char_based(fp, void_buffer, TRAILING_PADDING);
 }
 
 void print_header(struct TarHeader* header)
@@ -298,14 +319,20 @@ bool is_header_empty(struct TarHeader* header)
 }
 
 bool
-is_end_of_archive(FILE* fp, struct TarHeader* header)
+is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 {
+	if (*EOF_reached)
+		return true;
 	// End of archive is defined by the standard as two consecutive empty records (headers)
 	if (is_header_empty(header)) {
 		if (DEBUG)
 			printf("\tFirst record empty\n");
 		// The first record is empty, check the next one
-		read_header(fp, header);
+		read_header(fp, header, EOF_reached);
+		if (*EOF_reached) {
+			warnx("A lone zero block is not an end-of-archive indicator");
+			return true;
+		}
 		if (is_header_empty(header)) {
 			if (DEBUG)
 				printf("\tSecond record empty\n");
@@ -335,7 +362,8 @@ list_archive(FILE* fp, struct Args* args)
 	for (int i = 0; i < args->member_count; ++i)
 		is_present[i] = false;
 	
-	while (read_header(fp, &read), !is_end_of_archive(fp, &read))
+	bool EOF_reached = false;
+	while (read_header(fp, &read, &EOF_reached), !is_end_of_archive(fp, &read, &EOF_reached))
 	{
 		if (DEBUG)
 			printf("**********\n");
