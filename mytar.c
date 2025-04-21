@@ -26,7 +26,7 @@
 
 struct Args { bool is_valid; char* output_file; char** members; int member_count; bool should_list; };
 
-enum ArgOption { None = 0, List = 0b1, Members = 0b10 };
+enum ArgOption { None = 0, Filename = 0b1, List = 0b10 };
 
 void
 add_member(struct Args* args, char* member)
@@ -40,18 +40,18 @@ void parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 	switch (*flag)
 	{
         case 'f':
-		    args->should_list = true;
             args->is_valid = true;
-			*options |= List;
+			*options |= Filename;
 			++flag;  // Move to the next character
 			if (*flag != '\0') // If the option is followed by a value, set it
 				args->output_file = flag;
 			break;
 		case 't':
-			if (*options == None)
-				errx(2, "-t flag set before defining flag");
+			args->should_list = true;
+			if (*options == Filename && args->output_file == NULL)
+				errx(2, "-t flag set before defining archive file");
 			
-			*options |= Members;
+			*options |= List;
 			++flag;  // Move to the next character
 			if (*flag != '\0') {
 				// If the option is followed by a value, add it to members
@@ -92,14 +92,14 @@ parse_arguments(int argc, char** argv)
 			continue;
 	    }
 
-		if ((options & List) == 0)
+		if ((options & Filename) == 0)
 			errx(2, "Value provided without option: %s", argv[i]);
 
 		if (parsed.output_file == NULL) {
 			// If the output file is not set, set it to the current argument
 			parsed.output_file = argv[i];
 			parsed.is_valid = true;
-		} else if ((options & Members) != 0) {
+		} else if ((options & List) != 0) {
 			// If the output file is already set, add it to members
 			add_member(&parsed, argv[i]);
 		} else 
