@@ -24,16 +24,6 @@
 
 #define DEBUG true
 
-/* Argument parsing */
-/*
-Currently supports passing options and values separately.
-For example:
-	-f mytar
-	-t
-	-f mytar -t
-	-t -f mytar
-	-f mytar -t -f mytar2
-*/
 struct Args { bool is_valid; char* output_file; char** members; int member_count; bool should_list; };
 
 enum ArgOption { None = 0, List = 0b1, Members = 0b10 };
@@ -54,14 +44,13 @@ void parse_flag(struct Args* args, char* flag, enum ArgOption* options)
             args->is_valid = true;
 			*options |= List;
 			++flag;  // Move to the next character
-			if (*flag != '\0') { // If the option is followed by a value, set it
+			if (*flag != '\0') // If the option is followed by a value, set it
 				args->output_file = flag;
-			}
 			break;
 		case 't':
-			if (*options == None) {
-				errx(2, "-f flag set before defining flag");
-			}
+			if (*options == None)
+				errx(2, "-t flag set before defining flag");
+			
 			*options |= Members;
 			++flag;  // Move to the next character
 			if (*flag != '\0') {
@@ -113,9 +102,8 @@ parse_arguments(int argc, char** argv)
 		} else if ((options & Members) != 0) {
 			// If the output file is already set, add it to members
 			add_member(&parsed, argv[i]);
-		} else {
+		} else 
 			errx(2, "Value provided without option: %s", argv[i]);
-		}
 	}
 	return parsed;
 }
@@ -257,9 +245,8 @@ read_header(FILE* fp, struct TarHeader* header)
 
 void print_header(struct TarHeader* header)
 {
-	if (header->prefix[0] != '\0') {
+	if (header->prefix[0] != '\0')
 		printf("%s/", header->prefix);
-	}
 	printf("%s\n", header->name);
 	if (DEBUG) {
 		printf("Mode: %zu\n", header->mode);
@@ -300,23 +287,20 @@ is_end_of_archive(FILE* fp, struct TarHeader* header)
 {
 	// End of archive is defined by the standard as two consecutive empty records (headers)
 	if (is_header_empty(header)) {
-		if (DEBUG) {
+		if (DEBUG)
 			printf("\tFirst record empty\n");
-		}
 		// The first record is empty, check the next one
 		read_header(fp, header);
 		if (is_header_empty(header)) {
-			if (DEBUG) {
+			if (DEBUG)
 				printf("\tSecond record empty\n");
-			}
 			// The second record is also empty, we reached the end of the archive
 			return true;
 		}
 		// The second record is not empty
 		// Print the first archive to the console
-		if (DEBUG) {
+		if (DEBUG)
 			printf("\tSecond record NOT empty\n");
-		}
 		struct TarHeader empty_header = {0};
 		print_header(&empty_header);
 		// The second record not empty and currently set to header
@@ -329,23 +313,28 @@ list_archive(FILE* fp, struct Args* args)
 {
 	fseek(fp, 0, SEEK_SET);
 	struct TarHeader read;
+	// Initialize array showing if the member is present
+	bool* is_present = malloc(sizeof(bool) * args->member_count);
+	if (is_present == NULL && args->member_count > 0)
+		err(2, "malloc");
+	for (int i = 0; i < args->member_count; ++i)
+		is_present[i] = false;
 	
 	while (read_header(fp, &read), !is_end_of_archive(fp, &read))
 	{
-		if (DEBUG) {
+		if (DEBUG)
 			printf("**********\n");
-		}
 
 		bool should_print = (args->member_count == 0);
 		for (int i = 0; i < args->member_count; ++i) {
 			if (strcmp(read.name, args->members[i]) == 0) {
 				should_print = true;
+				is_present[i] = true;
 				break;
 			}
 		}
-		if (should_print) {
+		if (should_print)
 			print_header(&read);
-		}
 
 		// Skip file data and advance to the next header
 		size_t data_record_amount = (RECORD_SIZE - 1 + read.size) / RECORD_SIZE;  // defined by standard
@@ -358,6 +347,24 @@ list_archive(FILE* fp, struct Args* args)
 	if (DEBUG) {
 		printf("**********\n");
 		printf("End of archive\n");
+	}
+	// Print the members that were not found
+	if (args->member_count > 0) {
+		for (int i = 0; i < args->member_count; ++i) {
+			if (!is_present[i])
+				errx(2, "%s: Not found in archive", args->members[i]);
+		}
+	}
+	free(is_present);
+}
+
+void
+free_memory(struct Args* args)
+{
+	if (args->members != NULL) {
+		for (int i = 0; i < args->member_count; ++i)
+			free(args->members[i]);
+		free(args->members);
 	}
 }
 
@@ -373,9 +380,8 @@ main(int argc, char* argv[])
 	if (DEBUG) {
 		printf("Output file: %s\n", args.output_file);
 		printf("Should list: %s\n", args.should_list ? "true" : "false");
-		for (int i = 0; i < args.member_count; ++i) {
+		for (int i = 0; i < args.member_count; ++i)
 			printf("Member %d: %s\n", i, args.members[i]);
-		}
 		printf("Member count: %d\n", args.member_count);
 		printf("**********\n");
 	}
@@ -386,4 +392,7 @@ main(int argc, char* argv[])
 
 	if (args.should_list)
 		list_archive(fp, &args);
+
+	free_memory(&args);
+	fclose(fp);
 }
