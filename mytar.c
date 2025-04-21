@@ -41,9 +41,6 @@ enum ArgOption { None = 0, List = 0b1, Members = 0b10 };
 void
 add_member(struct Args* args, char* member)
 {
-	args->members = realloc(args->members, sizeof(char*) * (args->member_count + 1));
-	if (args->members == NULL)
-		err(2, "realloc");
 	args->members[args->member_count] = member;
 	args->member_count++;
 }
@@ -87,6 +84,11 @@ parse_arguments(int argc, char** argv)
 		.members = NULL,
 		.member_count = 0
 	};
+	// Preallocate memory for members
+	parsed.members = malloc(sizeof(char*) * (argc-1));
+	if (parsed.members == NULL)
+		err(2, "malloc");
+
     enum ArgOption options = None;
 	argv++;  // Skip the program name
 	argc--;  // Decrease the argument count
