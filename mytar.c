@@ -237,6 +237,7 @@ read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 		*EOF_reached = true;
 		return;
 	}
+	memset(header, 0, sizeof *header);  /* Initialize the header to zero */
 	// Read name
 	read_char_based(fp, header->name, NAME_LENGTH);
 	header->mode = read_integer_based(fp, MODE_LENGTH);
@@ -250,6 +251,13 @@ read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 		errx(2, "Unsupported header type: %d", header->typeflag);
 	read_char_based(fp, header->linkname, LINKNAME_LENGTH);
 	read_char_based(fp, header->magic, MAGIC_LENGTH);
+	if (*header->magic != '\0' && strncmp(header->magic, "ustar", MAGIC_LENGTH - 1) != 0)
+	{
+		#ifdef DEBUG
+			printf("Magic: %s\n", header->magic);
+		#endif
+		errx(2, "This does not look like a tar archive");
+	}
 	read_char_based(fp, header->version, VERSION_LENGTH);
 	read_char_based(fp, header->uname, UNAME_LENGTH);
 	read_char_based(fp, header->gname, GNAME_LENGTH);
