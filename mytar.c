@@ -24,10 +24,16 @@
 
 #define DEBUG true
 
+/* ARGUMENT PARSING */
+
 struct Args { bool is_valid; char* output_file; char** members; int member_count; bool should_list; };
 
+/* An enum of possible flags */
 enum ArgOption { None = 0, Filename = 0b1, List = 0b10 };
 
+/**
+ * Adds char* member to the members array of struct Args.
+ */
 void
 add_member(struct Args* args, char* member)
 {
@@ -35,6 +41,14 @@ add_member(struct Args* args, char* member)
 	args->member_count++;
 }
 
+/**
+ * Parses a flag from the command line arguments and modifies the provided struct Args.
+ * (a flag is an argument starting with '-', this initial dash is skipped before calling this function)
+ * Parameters:
+ * - args: pointer to the struct Args to modify
+ * - flag: the flag to parse (e.g. "farchive.tar", "f", "t", "tfile.txt")
+ * - options: pointer to the enum ArgOption to modify
+ */
 void parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 {
 	switch (*flag)
@@ -42,8 +56,8 @@ void parse_flag(struct Args* args, char* flag, enum ArgOption* options)
         case 'f':
             args->is_valid = true;
 			*options |= Filename;
-			++flag;  // Move to the next character
-			if (*flag != '\0') // If the option is followed by a value, set it
+			++flag;
+			if (*flag != '\0') /* If the option is followed by a value, set it, e.g. -farchive.tar */
 				args->output_file = flag;
 			break;
 		case 't':
@@ -52,17 +66,20 @@ void parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 				errx(2, "-t flag set before defining archive file");
 			
 			*options |= List;
-			++flag;  // Move to the next character
-			if (*flag != '\0') {
-				// If the option is followed by a value, add it to members
+			++flag;
+			if (*flag != '\0')
 				add_member(args, flag);
-			}
 		    break;
 		default:
 			errx(2, "Unknown option: %s", flag);
 	}
 }
 
+
+/**
+ * Parses command line arguments and returns a struct Args with the parsed values.
+ * The function expects the first argument to be the program name, which is skipped.
+ */
 struct Args 
 parse_arguments(int argc, char** argv)
 {
@@ -73,14 +90,14 @@ parse_arguments(int argc, char** argv)
 		.members = NULL,
 		.member_count = 0
 	};
-	// Preallocate memory for members
+	/* Preallocate memory for members */
 	parsed.members = malloc(sizeof(char*) * (argc-1));
 	if (parsed.members == NULL)
 		err(2, "malloc");
 
     enum ArgOption options = None;
-	argv++;  // Skip the program name
-	argc--;  // Decrease the argument count
+	argv++;  /* Skip the program name */
+	argc--;  /* Decrease the argument count */
 	if (argc == 0)
 		errx(2, "No arguments provided");
 
@@ -96,11 +113,9 @@ parse_arguments(int argc, char** argv)
 			errx(2, "Value provided without option: %s", argv[i]);
 
 		if (parsed.output_file == NULL) {
-			// If the output file is not set, set it to the current argument
 			parsed.output_file = argv[i];
 			parsed.is_valid = true;
-		} else if ((options & List) != 0) {
-			// If the output file is already set, add it to members
+		} else if ((options & List) != 0) {  /* If the output file is already set, add it to members */
 			add_member(&parsed, argv[i]);
 		} else 
 			errx(2, "Value provided without option: %s", argv[i]);
@@ -131,10 +146,14 @@ struct TarHeader
 	char prefix[PREFIX_LENGTH + 1];
 };
 
+/**
+ * Reads a fixed number of characters from the file pointer into the buffer.
+ */
 void
 read_char_based(FILE* fp, char* buffer, size_t size)
 {
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
+	buffer[size] = '\0';  /* Null-terminate the string */
 	if (read != size) {
 		if (feof(fp))
 			errx(2, "Unexpected EOF in archive");
@@ -144,8 +163,13 @@ read_char_based(FILE* fp, char* buffer, size_t size)
 	return;
 }
 
+/**
+ * Reads an integer from the file pointer and returns it.
+ * The integer is read as a string of octal digits, and then converted to an unsigned long long.
+ * If the first bit is set, it is interpreted as a base 256 number.
+ */
 size_t
-read_integer_based(FILE* fp, size_t size, bool* ok)
+read_integer_based(FILE* fp, size_t size)
 {
 	char buffer[size];
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
@@ -153,8 +177,7 @@ read_integer_based(FILE* fp, size_t size, bool* ok)
 		if (feof(fp))
 			errx(2, "Unexpected EOF in archive");
 		else {
-			*ok = false;
-			return 0ULL;
+			errx(2, "read_integer_based");
 		}
 	}
 
@@ -215,67 +238,28 @@ read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 		*EOF_reached = true;
 		return;
 	}
-	bool ok = true;
 	// Read name
 	read_char_based(fp, header->name, NAME_LENGTH);
-	header->name[NAME_LENGTH] = '\0';
-	// Read mode
-	header->mode = read_integer_based(fp, MODE_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_mode");
-	// Read uid
-	header->uid = read_integer_based(fp, UID_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_uid");
-	// Read gid
-	header->gid = read_integer_based(fp, GID_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_gid");
-	// Read size
-	header->size = read_integer_based(fp, SIZE_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_size");
-	// Read mtime
-	header->mtime = read_integer_based(fp, MTIME_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_mtime");
-	// Read chksum
-	header->chksum = read_integer_based(fp, CHKSUM_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_chksum");
-	// Read typeflag
+	header->mode = read_integer_based(fp, MODE_LENGTH);
+	header->uid = read_integer_based(fp, UID_LENGTH);
+	header->gid = read_integer_based(fp, GID_LENGTH);
+	header->size = read_integer_based(fp, SIZE_LENGTH);
+	header->mtime = read_integer_based(fp, MTIME_LENGTH);
+	header->chksum = read_integer_based(fp, CHKSUM_LENGTH);
 	header->typeflag = read_char(fp);
 	if (header->typeflag != '0' && header->typeflag != '\0') // supporting only regular files
 		errx(2, "Unsupported header type: %d", header->typeflag);
-	// Read linkname
 	read_char_based(fp, header->linkname, LINKNAME_LENGTH);
-	header->linkname[LINKNAME_LENGTH] = '\0';
-	// Read magic
 	read_char_based(fp, header->magic, MAGIC_LENGTH);
-	header->magic[MAGIC_LENGTH] = '\0';
-	// Read version
 	read_char_based(fp, header->version, VERSION_LENGTH);
-	header->version[VERSION_LENGTH] = '\0';
-	// Read uname
 	read_char_based(fp, header->uname, UNAME_LENGTH);
-	header->uname[UNAME_LENGTH] = '\0';
-	// Read gname
 	read_char_based(fp, header->gname, GNAME_LENGTH);
-	header->gname[GNAME_LENGTH] = '\0';
-	// Read devmajor
-	header->devmajor = read_integer_based(fp, DEVMAJOR_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_devmajor");
-	// Read devminor
-	header->devminor = read_integer_based(fp, DEVMINOR_LENGTH, &ok);
-	if (!ok)
-		err(2, "read_devminor");
-	// Read prefix
+	header->devmajor = read_integer_based(fp, DEVMAJOR_LENGTH);
+	header->devminor = read_integer_based(fp, DEVMINOR_LENGTH);
 	read_char_based(fp, header->prefix, PREFIX_LENGTH);
-	header->prefix[PREFIX_LENGTH] = '\0';
 
-	// Skip traling header
-	char void_buffer[TRAILING_PADDING];  // will be thrown away
+	/* Skip traling header */
+	char void_buffer[TRAILING_PADDING];  /* Will be thrown away */
 	read_char_based(fp, void_buffer, TRAILING_PADDING);
 }
 
@@ -305,7 +289,6 @@ void print_header(struct TarHeader* header)
 
 bool is_header_empty(struct TarHeader* header)
 {
-	// Check if the header is empty
 	if (header->name[0] == '\0' && header->mode == 0 && header->uid == 0 &&
 		header->gid == 0 && header->size == 0 && header->mtime == 0 &&
 		header->chksum == 0 && header->typeflag == '\0' &&
@@ -323,11 +306,11 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 {
 	if (*EOF_reached)
 		return true;
-	// End of archive is defined by the standard as two consecutive empty records (headers)
+	/* End of archive is defined by the standard as two consecutive empty records (headers) */
 	if (is_header_empty(header)) {
 		if (DEBUG)
 			printf("\tFirst record empty\n");
-		// The first record is empty, check the next one
+		/* The first record is empty, check the next one */
 		read_header(fp, header, EOF_reached);
 		if (*EOF_reached) {
 			warnx("A lone zero block is not an end-of-archive indicator");
@@ -336,16 +319,16 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 		if (is_header_empty(header)) {
 			if (DEBUG)
 				printf("\tSecond record empty\n");
-			// The second record is also empty, we reached the end of the archive
+			/* The second record is also empty, we reached the end of the archive */
 			return true;
 		}
-		// The second record is not empty
-		// Print the first archive to the console
+		/* The second record is not empty */
+		/* Print the first archive to the console */
 		if (DEBUG)
 			printf("\tSecond record NOT empty\n");
 		struct TarHeader empty_header = {0};
 		print_header(&empty_header);
-		// The second record not empty and currently set to header
+		/* The second record not empty and currently set to header */
 	}
 	return false;
 }
@@ -355,7 +338,7 @@ list_archive(FILE* fp, struct Args* args)
 {
 	fseek(fp, 0, SEEK_SET);
 	struct TarHeader read;
-	// Initialize array showing if the member is present
+	/* Initialize array showing if the member is present */
 	bool* is_present = malloc(sizeof(bool) * args->member_count);
 	if (is_present == NULL && args->member_count > 0)
 		err(2, "malloc");
@@ -379,8 +362,8 @@ list_archive(FILE* fp, struct Args* args)
 		if (should_print)
 			print_header(&read);
 
-		// Skip file data and advance to the next header
-		size_t data_record_amount = (RECORD_SIZE - 1 + read.size) / RECORD_SIZE;  // defined by standard
+		/* Skip file data and advance to the next header */
+		size_t data_record_amount = (RECORD_SIZE - 1 + read.size) / RECORD_SIZE;  /* Defined by standard */
 		if (DEBUG) {
 			printf("\tData record amount: %zu\n", data_record_amount);
 		}
@@ -391,7 +374,7 @@ list_archive(FILE* fp, struct Args* args)
 		printf("**********\n");
 		printf("End of archive\n");
 	}
-	// Print the members that were not found
+	/* Print the members that were not found */
 	if (args->member_count > 0) {
 		for (int i = 0; i < args->member_count; ++i) {
 			if (!is_present[i])
