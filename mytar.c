@@ -22,8 +22,6 @@
 #define TRAILING_PADDING 12
 #define RECORD_SIZE 512
 
-#define DEBUG true
-
 /* ARGUMENT PARSING */
 
 struct Args { bool is_valid; char* output_file; char** members; int member_count; bool should_list; };
@@ -233,8 +231,9 @@ void
 read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 {
 	if (check_EOF(fp)) {
-		if (DEBUG)
+		#ifdef DEBUG
 			printf("Unexpected EOF\n");
+		#endif
 		*EOF_reached = true;
 		return;
 	}
@@ -268,7 +267,7 @@ void print_header(struct TarHeader* header)
 	if (header->prefix[0] != '\0')
 		printf("%s/", header->prefix);
 	printf("%s\n", header->name);
-	if (DEBUG) {
+	#ifdef DEBUG
 		printf("Mode: %zu\n", header->mode);
 		printf("UID: %zu\n", header->uid);
 		printf("GID: %zu\n", header->gid);
@@ -284,7 +283,7 @@ void print_header(struct TarHeader* header)
 		printf("Devmajor: %zu\n", header->devmajor);
 		printf("Devminor: %zu\n", header->devminor);
 		printf("Prefix: %s\n", header->prefix);
-	}
+	#endif
 }
 
 bool is_header_empty(struct TarHeader* header)
@@ -308,8 +307,9 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 		return true;
 	/* End of archive is defined by the standard as two consecutive empty records (headers) */
 	if (is_header_empty(header)) {
-		if (DEBUG)
+		#ifdef DEBUG
 			printf("\tFirst record empty\n");
+		#endif
 		/* The first record is empty, check the next one */
 		read_header(fp, header, EOF_reached);
 		if (*EOF_reached) {
@@ -317,15 +317,17 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 			return true;
 		}
 		if (is_header_empty(header)) {
-			if (DEBUG)
+			#ifdef DEBUG
 				printf("\tSecond record empty\n");
+			#endif
 			/* The second record is also empty, we reached the end of the archive */
 			return true;
 		}
 		/* The second record is not empty */
 		/* Print the first archive to the console */
-		if (DEBUG)
+		#ifdef DEBUG
 			printf("\tSecond record NOT empty\n");
+		#endif
 		struct TarHeader empty_header = {0};
 		print_header(&empty_header);
 		/* The second record not empty and currently set to header */
@@ -348,9 +350,9 @@ list_archive(FILE* fp, struct Args* args)
 	bool EOF_reached = false;
 	while (read_header(fp, &read, &EOF_reached), !is_end_of_archive(fp, &read, &EOF_reached))
 	{
-		if (DEBUG)
+		#ifdef DEBUG
 			printf("**********\n");
-
+		#endif
 		bool should_print = (args->member_count == 0);
 		for (int i = 0; i < args->member_count; ++i) {
 			if (strcmp(read.name, args->members[i]) == 0) {
@@ -364,16 +366,16 @@ list_archive(FILE* fp, struct Args* args)
 
 		/* Skip file data and advance to the next header */
 		size_t data_record_amount = (RECORD_SIZE - 1 + read.size) / RECORD_SIZE;  /* Defined by standard */
-		if (DEBUG) {
+		#ifdef DEBUG
 			printf("\tData record amount: %zu\n", data_record_amount);
-		}
+		#endif
 		fseek(fp, RECORD_SIZE * data_record_amount, SEEK_CUR);
 	}
 
-	if (DEBUG) {
+	#ifdef DEBUG
 		printf("**********\n");
 		printf("End of archive\n");
-	}
+	#endif
 	/* Print the members that were not found */
 	if (args->member_count > 0) {
 		for (int i = 0; i < args->member_count; ++i) {
@@ -403,14 +405,14 @@ main(int argc, char* argv[])
 		return 1;
 	}
 
-	if (DEBUG) {
+	#ifdef DEBUG
 		printf("Output file: %s\n", args.output_file);
 		printf("Should list: %s\n", args.should_list ? "true" : "false");
 		for (int i = 0; i < args.member_count; ++i)
 			printf("Member %d: %s\n", i, args.members[i]);
 		printf("Member count: %d\n", args.member_count);
 		printf("**********\n");
-	}
+	#endif
 
     FILE* fp;
 	if ((fp = fopen(args.output_file, "r")) == NULL)
