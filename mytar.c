@@ -108,6 +108,9 @@ parse_arguments(int argc, char** argv)
 	return parsed;
 }
 
+
+/* ACTUAL TAR PROGRAM */
+
 struct TarHeader
 {
 	char name[NAME_LENGTH + 1];
@@ -132,8 +135,12 @@ bool
 read_char_based(FILE* fp, char* buffer, size_t size)
 {
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
-	if (read != size)
-		return false;
+	if (read != size) {
+		if (feof(fp))
+			errx(2, "Unexpected EOF in archive");
+		else
+			return false;
+	}
 	return true;
 }
 
@@ -143,8 +150,12 @@ read_integer_based(FILE* fp, size_t size, bool* ok)
 	char buffer[size];
 	size_t read = fread(buffer, sizeof(buffer[0]), size, fp);
 	if (read != size) {
-		*ok = false;
-		return 0ULL;
+		if (feof(fp))
+			errx(2, "Unexpected EOF in archive");
+		else {
+			*ok = false;
+			return 0ULL;
+		}
 	}
 
 	int first_bit_mask = 0b10000000;
@@ -164,8 +175,12 @@ read_char(FILE* fp)
 {
 	char c;
 	size_t read = fread(&c, sizeof(char), 1, fp);
-	if (read != 1)
-		err(2, "read_char");
+	if (read != 1) {
+		if (feof(fp))
+			errx(2, "Unexpected EOF in archive");
+		else
+			errx(2, "read_typeflag");
+	}
 	return c;
 }
 
