@@ -36,63 +36,85 @@ For example:
 */
 struct Args { bool is_valid; char* output_file; char** members; int member_count; bool should_list; };
 
-enum ArgOption { Filename = 0 };
+enum ArgOption { None = 0, List = 0b1, Members = 0b10 };
 
-struct Args parse_arguments(int argc, char** argv)
+void
+add_member(struct Args* args, char* member)
+{
+	args->members = realloc(args->members, sizeof(char*) * (args->member_count + 1));
+	if (args->members == NULL)
+		err(2, "realloc");
+	args->members[args->member_count] = member;
+	args->member_count++;
+}
+
+void parse_flag(struct Args* args, char* flag, enum ArgOption* options)
+{
+	switch (*flag)
+	{
+        case 'f':
+		    args->should_list = true;
+            args->is_valid = true;
+			*options |= List;
+			++flag;  // Move to the next character
+			if (*flag != '\0') { // If the option is followed by a value, set it
+				args->output_file = flag;
+			}
+			break;
+		case 't':
+			if (*options == None) {
+				errx(2, "-f flag set before defining flag");
+			}
+			*options |= Members;
+			++flag;  // Move to the next character
+			if (*flag != '\0') {
+				// If the option is followed by a value, add it to members
+				add_member(args, flag);
+			}
+		    break;
+		default:
+			errx(2, "Unknown option: %s", flag);
+	}
+}
+
+struct Args 
+parse_arguments(int argc, char** argv)
 {
     struct Args parsed = {
 		.is_valid = false, 
-		.output_file = "default.tar", 
+		.output_file = NULL, 
 		.should_list = false,
 		.members = NULL,
 		.member_count = 0
 	};
-    bool last_arg_setup = false;
-    enum ArgOption last_option = Filename;
+    enum ArgOption options = None;
+	argv++;  // Skip the program name
+	argc--;  // Decrease the argument count
+	if (argc == 0)
+		errx(2, "No arguments provided");
 
     for (int i = 0; i < argc; ++i)
     {
         if (argv[i][0] == '-')
 		{
-            last_arg_setup = true;
-	    	switch (argv[i][1])
-	    	{
-                case 't':
-		    		parsed.should_list = true;
-                    parsed.is_valid = true;
-		    		break;
-				case 'f':
-		    		last_option = Filename;
-		    		break;
-				default:
-					errx(2, "Unknown option: %s", argv[i]);
-			}
+	    	parse_flag(&parsed, argv[i] + 1, &options);
 			continue;
 	    }
-		if (!last_arg_setup)
-			continue;
-		last_arg_setup = false;
-		// Passing option values
-		switch (last_option)
-		{
-			case Filename:
-				parsed.output_file = argv[i];
-                parsed.is_valid = true;
-				break;
-			default:
-				if (parsed.should_list) {
-					parsed.members = realloc(parsed.members, sizeof(char*) * (parsed.member_count + 1));
-					if (parsed.members == NULL)
-						err(2, "realloc");
-					parsed.members[parsed.member_count] = argv[i];
-					parsed.member_count++;
-					break;
-				}
-				errx(2, "Unknown option: %s", argv[i]);
-				break;
+
+		if ((options & List) == 0)
+			errx(2, "Value provided without option: %s", argv[i]);
+
+		if (parsed.output_file == NULL) {
+			// If the output file is not set, set it to the current argument
+			parsed.output_file = argv[i];
+			parsed.is_valid = true;
+		} else if ((options & Members) != 0) {
+			// If the output file is already set, add it to members
+			add_member(&parsed, argv[i]);
+		} else {
+			errx(2, "Value provided without option: %s", argv[i]);
 		}
 	}
-
 	return parsed;
 }
 
@@ -277,13 +299,13 @@ is_end_of_archive(FILE* fp, struct TarHeader* header)
 	// End of archive is defined by the standard as two consecutive empty records (headers)
 	if (is_header_empty(header)) {
 		if (DEBUG) {
-			printf("First record empty\n");
+			printf("\tFirst record empty\n");
 		}
 		// The first record is empty, check the next one
 		read_header(fp, header);
 		if (is_header_empty(header)) {
 			if (DEBUG) {
-				printf("Second record empty\n");
+				printf("\tSecond record empty\n");
 			}
 			// The second record is also empty, we reached the end of the archive
 			return true;
@@ -291,7 +313,7 @@ is_end_of_archive(FILE* fp, struct TarHeader* header)
 		// The second record is not empty
 		// Print the first archive to the console
 		if (DEBUG) {
-			printf("Second record NOT empty\n");
+			printf("\tSecond record NOT empty\n");
 		}
 		struct TarHeader empty_header = {0};
 		print_header(&empty_header);
@@ -349,6 +371,10 @@ main(int argc, char* argv[])
 	if (DEBUG) {
 		printf("Output file: %s\n", args.output_file);
 		printf("Should list: %s\n", args.should_list ? "true" : "false");
+		for (int i = 0; i < args.member_count; ++i) {
+			printf("Member %d: %s\n", i, args.members[i]);
+		}
+		printf("Member count: %d\n", args.member_count);
 		printf("**********\n");
 	}
 
