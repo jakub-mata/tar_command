@@ -30,6 +30,8 @@ struct Args {
 	char** members;
 	int member_count;
 	bool should_list;
+	bool should_extract;
+	bool is_verbose;
 };
 
 /* An enum of possible flags */
@@ -63,6 +65,8 @@ parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 				args->output_file = flag;
 			break;
 		case 't':
+			if (args->should_extract)
+				errx(2, "Incompatible flags passed in");
 			args->should_list = true;
 			if (*options == Filename && args->output_file == NULL)
 				errx(2, "-t flag set before archive filename");
@@ -71,6 +75,14 @@ parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 			if (*flag != '\0')
 				add_member(args, flag);
 		    break;
+		case 'x':
+			if (args->should_list)
+				errx(2, "Incompatible flags passed in");
+			args->should_extract = true;
+			break;
+		case 'v':
+			args->is_verbose = true;
+			break;
 		default:
 			errx(2, "Unknown option: %s", flag);
 	}
@@ -89,7 +101,9 @@ parse_arguments(int argc, char** argv)
 		.output_file = NULL,
 		.should_list = false,
 		.members = NULL,
-		.member_count = 0
+		.member_count = 0,
+		.is_verbose = false,
+		.should_extract = false
 	};
 	/* Preallocate memory for members */
 	parsed.members = malloc(sizeof (char*) * (argc - 1));
@@ -434,6 +448,12 @@ list_archive(FILE* fp, struct Args* args)
 	#endif
 	print_members(args, is_present);
 	free(is_present);
+}
+
+void
+extract_archive(FILE* fp, struct Args* args)
+{
+
 }
 
 int
