@@ -228,7 +228,7 @@ check_EOF(FILE* fp)
  * Returns true if the header was read successfully, false if EOF reached at first character.
  */
 void
-read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
+read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached, size_t* record_counter)
 {
 	if (check_EOF(fp)) {
 		#ifdef DEBUG
@@ -256,7 +256,8 @@ read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 		#ifdef DEBUG
 			printf("Magic: %s\n", header->magic);
 		#endif
-		errx(2, "This does not look like a tar archive");
+		warnx("This does not look like a tar archive");
+		errx(2, "Exiting with failure status due to previous errors");
 	}
 	read_char_based(fp, header->version, VERSION_LENGTH);
 	read_char_based(fp, header->uname, UNAME_LENGTH);
@@ -268,6 +269,8 @@ read_header(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 	/* Skip traling header */
 	char void_buffer[TRAILING_PADDING];  /* Will be thrown away */
 	read_char_based(fp, void_buffer, TRAILING_PADDING);
+
+	*record_counter += 1;
 }
 
 void print_header(struct TarHeader* header)
@@ -309,7 +312,7 @@ bool is_header_empty(struct TarHeader* header)
 }
 
 bool
-is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
+is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached, size_t* record_counter)
 {
 	if (*EOF_reached)
 		return true;
@@ -319,9 +322,9 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 			printf("\tFirst record empty\n");
 		#endif
 		/* The first record is empty, check the next one */
-		read_header(fp, header, EOF_reached);
+		read_header(fp, header, EOF_reached, record_counter);
 		if (*EOF_reached) {
-			warnx("A lone zero block is not an end-of-archive indicator");
+			warnx("A lone zero block at %zu", *record_counter);
 			return true;
 		}
 		if (is_header_empty(header)) {
@@ -331,16 +334,32 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached)
 			/* The second record is also empty, we reached the end of the archive */
 			return true;
 		}
-		/* The second record is not empty */
-		/* Print the first archive to the console */
 		#ifdef DEBUG
 			printf("\tSecond record NOT empty\n");
 		#endif
+		/* The second record is not empty */
+		/* Print the first archive to the console */
 		struct TarHeader empty_header = {0};
 		print_header(&empty_header);
 		/* The second record not empty and currently set to header */
 	}
 	return false;
+}
+
+void skip_data_records(FILE* fp, size_t size)
+{
+	size_t data_record_amount = (RECORD_SIZE - 1 + size) / RECORD_SIZE;  /* Defined by standard */
+	#ifdef DEBUG
+		printf("\tData record amount: %zu\n", data_record_amount);
+	#endif
+	int ok = fseek(fp, RECORD_SIZE * data_record_amount, SEEK_CUR);
+	if (ok != 0) {
+		if (feof(fp)) {
+			warnx("Unexpected EOF in archive");
+		}
+		else
+			errx(2, "fseek");
+	}
 }
 
 void
@@ -356,7 +375,8 @@ list_archive(FILE* fp, struct Args* args)
 		is_present[i] = false;
 	
 	bool EOF_reached = false;
-	while (read_header(fp, &read, &EOF_reached), !is_end_of_archive(fp, &read, &EOF_reached))
+	size_t record_counter = 0;
+	while (read_header(fp, &read, &EOF_reached, &record_counter), !is_end_of_archive(fp, &read, &EOF_reached, &record_counter))
 	{
 		#ifdef DEBUG
 			printf("**********\n");
@@ -372,12 +392,7 @@ list_archive(FILE* fp, struct Args* args)
 		if (should_print)
 			print_header(&read);
 
-		/* Skip file data and advance to the next header */
-		size_t data_record_amount = (RECORD_SIZE - 1 + read.size) / RECORD_SIZE;  /* Defined by standard */
-		#ifdef DEBUG
-			printf("\tData record amount: %zu\n", data_record_amount);
-		#endif
-		fseek(fp, RECORD_SIZE * data_record_amount, SEEK_CUR);
+		skip_data_records(fp, read.size);
 	}
 
 	#ifdef DEBUG
@@ -385,11 +400,16 @@ list_archive(FILE* fp, struct Args* args)
 		printf("End of archive\n");
 	#endif
 	/* Print the members that were not found */
+	bool missing_found = false;
 	if (args->member_count > 0) {
 		for (int i = 0; i < args->member_count; ++i) {
-			if (!is_present[i])
-				errx(2, "%s: Not found in archive", args->members[i]);
+			if (!is_present[i]) {
+				missing_found = true;
+				warnx("%s: Not found in archive", args->members[i]);
+			}
 		}
+		if (missing_found)
+			errx(2, "Exiting with failure status due to previous errors");
 	}
 	free(is_present);
 }
@@ -397,11 +417,7 @@ list_archive(FILE* fp, struct Args* args)
 void
 free_memory(struct Args* args)
 {
-	if (args->members != NULL) {
-		for (int i = 0; i < args->member_count; ++i)
-			free(args->members[i]);
-		free(args->members);
-	}
+	free(args->members);
 }
 
 int
