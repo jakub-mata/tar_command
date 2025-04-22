@@ -210,12 +210,10 @@ check_EOF(FILE* fp)
 {
 	char c;
 	size_t read = fread(&c, sizeof(char), 1, fp);
-	if (read == 0) {
-		if (feof(fp))
-			return true;
-		else
-			errx(2, "check_EOF");
-	}
+	if (feof(fp))
+		return true;
+	if (read == 0)
+		errx(2, "check_EOF");
 	if (read == 1) {
 		ungetc(c, fp);  // put the character back
 		return false;
@@ -346,26 +344,46 @@ is_end_of_archive(FILE* fp, struct TarHeader* header, bool* EOF_reached, size_t*
 	return false;
 }
 
-void skip_data_records(FILE* fp, size_t size)
+void skip_data_records(FILE* fp, size_t size, size_t *record_counter)
 {
 	size_t data_record_amount = (RECORD_SIZE - 1 + size) / RECORD_SIZE;  /* Defined by standard */
 	#ifdef DEBUG
 		printf("\tData record amount: %zu\n", data_record_amount);
 	#endif
-	int ok = fseek(fp, RECORD_SIZE * data_record_amount, SEEK_CUR);
-	if (ok != 0) {
-		if (feof(fp)) {
-			warnx("Unexpected EOF in archive");
+
+	/* Reads all data blocks except for last character which will be checked for EOF*/
+	int ok = fseek(fp, RECORD_SIZE * data_record_amount - 1, SEEK_CUR); 
+	if (ok != 0)
+		errx(2, "fseek");
+	char test_c = fgetc(fp);
+	if (test_c == EOF) {
+		warnx("Unexpected EOF in archive");
+		errx(2, "Error is not recoverable: exiting now");
+	}
+	
+	*record_counter += data_record_amount;
+}
+
+void
+print_members(struct Args* args, bool* is_present)
+{
+	bool missing_found = false;
+	if (args->member_count > 0) {
+		for (int i = 0; i < args->member_count; ++i) {
+			if (!is_present[i]) {
+				missing_found = true;
+				warnx("%s: Not found in archive", args->members[i]);
+			}
 		}
-		else
-			errx(2, "fseek");
+		if (missing_found)
+			errx(2, "Exiting with failure status due to previous errors");
 	}
 }
 
 void
 list_archive(FILE* fp, struct Args* args)
-{
-	fseek(fp, 0, SEEK_SET);
+{	
+	rewind(fp);
 	struct TarHeader read;
 	/* Initialize array showing if the member is present */
 	bool* is_present = malloc(sizeof(bool) * args->member_count);
@@ -392,42 +410,23 @@ list_archive(FILE* fp, struct Args* args)
 		if (should_print)
 			print_header(&read);
 
-		skip_data_records(fp, read.size);
+		skip_data_records(fp, read.size, &record_counter);
 	}
 
 	#ifdef DEBUG
 		printf("**********\n");
 		printf("End of archive\n");
 	#endif
-	/* Print the members that were not found */
-	bool missing_found = false;
-	if (args->member_count > 0) {
-		for (int i = 0; i < args->member_count; ++i) {
-			if (!is_present[i]) {
-				missing_found = true;
-				warnx("%s: Not found in archive", args->members[i]);
-			}
-		}
-		if (missing_found)
-			errx(2, "Exiting with failure status due to previous errors");
-	}
+	print_members(args, is_present);
 	free(is_present);
-}
-
-void
-free_memory(struct Args* args)
-{
-	free(args->members);
 }
 
 int
 main(int argc, char* argv[])
 {
     struct Args args = parse_arguments(argc, argv);
-    if (!args.is_valid) {
+    if (!args.is_valid)
         errx(2, "%s", "Provided arguments are not valid");
-		return 1;
-	}
 
 	#ifdef DEBUG
 		printf("Output file: %s\n", args.output_file);
@@ -445,6 +444,6 @@ main(int argc, char* argv[])
 	if (args.should_list)
 		list_archive(fp, &args);
 
-	free_memory(&args);
+	free(args.members);
 	fclose(fp);
 }
