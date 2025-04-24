@@ -22,15 +22,15 @@
 #define	TRAILING_PADDING 12
 #define	RECORD_SIZE 512
 
-#define MAGIC "ustar"
+#define	MAGIC "ustar"
 
-/* ===========================
+/*
  * ARGUMENT STRUCTURES
- * =========================== */
+ */
 
 struct Args {
-	char* output_file;
-	char** members;
+	char *output_file;
+	char **members;
 	int member_count;
 	bool should_list;
 	bool should_extract;
@@ -38,31 +38,31 @@ struct Args {
 };
 
 enum ArgOption {
-    None = 0,         // No option provided
-    Filename = 0b1,   // Output tar archive file name specified
-    List = 0b10,      // List contents of the archive
-    Extract = 0b100   // Extract files from the archive
+	None = 0,			// No option provided
+    Filename = 0b1,		// Output tar archive file name specified
+	List = 0b10,		// List contents of the archive
+    Extract = 0b100		// Extract files from the archive
 };
 
 
-/* ===========================
+/*
  * ARGUMENT UTILITIES
- * =========================== */
+ */
 
 /* Adds a file member to the args structure */
 void
-add_member(struct Args* args, char* member) {
+add_member(struct Args *args, char *member) {
     if (!args || !member) {
-        fprintf(stderr, "Error: Null pointer passed to add_member.\n");
-        return;
-    }
+		fprintf(stderr, "Error: Null pointer passed to add_member.\n");
+		return;
+	}
     args->members[args->member_count] = member;
     args->member_count++;
 }
 
 /* Parse a single flag and update args and options accordingly */
 void
-parse_flag(struct Args* args, char* flag, enum ArgOption* options)
+parse_flag(struct Args *args, char *flag, enum ArgOption *options)
 {
 	switch (*flag) {
 		case 'f': *options |= Filename; break;
@@ -73,7 +73,8 @@ parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 	}
 }
 
-void validate_args(struct Args* args, enum ArgOption options)
+void
+validate_args(struct Args *args, enum ArgOption options)
 {
 	if (args == NULL) {
 		errx(2, "Null pointer passed to validate_args.\n");
@@ -92,7 +93,7 @@ void validate_args(struct Args* args, enum ArgOption options)
  * The function expects the first argument to be the program name.
  */
 struct Args
-parse_arguments(int argc, char** argv)
+parse_arguments(int argc, char **argv)
 {
 	struct Args parsed = {
 		.output_file = NULL,
@@ -103,7 +104,7 @@ parse_arguments(int argc, char** argv)
 		.should_extract = false
 	};
 	/* Preallocate memory for members */
-	parsed.members = malloc(sizeof (char*) * (argc - 1));
+	parsed.members = malloc(sizeof (char *) * (argc - 1));
 	if (parsed.members == NULL)
 		err(2, "malloc");
 
@@ -132,9 +133,9 @@ parse_arguments(int argc, char** argv)
 }
 
 
-/* ===========================
+/*
  * MAIN TAR LOGIC
- * =========================== */
+ */
 
 
 struct TarHeader
@@ -159,7 +160,7 @@ struct TarHeader
 
 /* Reads a fixed number of characters from the file pointer into the buffer. */
 void
-read_char_based(FILE* fp, char* buffer, size_t size)
+read_char_based(FILE *fp, char *buffer, size_t size)
 {
 	size_t read = fread(buffer, sizeof (char), size, fp);
 	buffer[size] = '\0';  /* Null-terminate the string */
@@ -176,13 +177,13 @@ read_char_based(FILE* fp, char* buffer, size_t size)
  * The first bit is used to determine if the number is in base 256.
  */
 size_t
-to_base_256(char* buffer, size_t buffer_size)
+to_base_256(char *buffer, size_t buffer_size)
 {
 	size_t result = 0;
 	for (size_t i = 1; i < buffer_size; ++i) {
 		result = (result << 8) | (unsigned char)buffer[i];
 	}
-	return result;
+	return (result);
 }
 
 /*
@@ -191,7 +192,7 @@ to_base_256(char* buffer, size_t buffer_size)
  * If the first bit is set, it is interpreted as a base 256 number.
  */
 size_t
-read_integer_based(FILE* fp, size_t size)
+read_integer_based(FILE *fp, size_t size)
 {
 	char buffer[size];
 	size_t read = fread(buffer, sizeof (buffer[0]), size, fp);
@@ -206,14 +207,14 @@ read_integer_based(FILE* fp, size_t size)
 	int first_bit_mask = 0b10000000;
 	// Files over 8G extension (star(1) extension)
 	if ((buffer[0] & first_bit_mask) == first_bit_mask) {
-		return to_base_256(buffer, size);
+		return (to_base_256(buffer, size));
 	}
 	// represented in octal
 	return (strtoull(buffer, NULL, 8));
 }
 
 char
-read_char(FILE* fp)
+read_char(FILE *fp)
 {
 	char c;
 	size_t read = fread(&c, sizeof (char), 1, fp);
@@ -231,7 +232,7 @@ read_char(FILE* fp)
  * reached, false otherwise.
  */
 bool
-check_EOF(FILE* fp)
+check_EOF(FILE *fp)
 {
 	char c;
 	size_t read = fread(&c, sizeof (char), 1, fp);
@@ -253,10 +254,10 @@ check_EOF(FILE* fp)
  */
 void
 read_header(
-	FILE* fp,
-	struct TarHeader* header,
-	bool* EOF_reached,
-	size_t* record_counter)
+	FILE *fp,
+	struct TarHeader *header,
+	bool *EOF_reached,
+	size_t *record_counter)
 {
 	if (check_EOF(fp)) {
 		*EOF_reached = true;
@@ -295,7 +296,7 @@ read_header(
 }
 
 void
-print_header(struct TarHeader* header)
+print_header(struct TarHeader *header)
 {
 	if (header->prefix[0] != '\0')
 		printf("%s/", header->prefix);
@@ -303,7 +304,7 @@ print_header(struct TarHeader* header)
 }
 
 bool
-is_header_empty(struct TarHeader* header)
+is_header_empty(struct TarHeader *header)
 {
 	if (header->name[0] == '\0' && header->mode == 0 && header->uid == 0 &&
 		header->gid == 0 && header->size == 0 && header->mtime == 0 &&
@@ -324,10 +325,10 @@ is_header_empty(struct TarHeader* header)
  */
 bool
 is_end_of_archive(
-	FILE* fp,
-	struct TarHeader* header,
-	bool* EOF_reached,
-	size_t* record_counter)
+	FILE *fp,
+	struct TarHeader *header,
+	bool *EOF_reached,
+	size_t *record_counter)
 {
 	if (*EOF_reached)
 		return (true);
@@ -353,7 +354,7 @@ is_end_of_archive(
 
 /* Skips the data records in the tar archive. */
 void
-skip_data_records(FILE* fp, size_t size, size_t *record_counter)
+skip_data_records(FILE *fp, size_t size, size_t *record_counter)
 {
 	size_t data_record_amount = (RECORD_SIZE - 1 + size) / RECORD_SIZE;
 	/* Reads all data blocks except for last character */
@@ -375,7 +376,7 @@ skip_data_records(FILE* fp, size_t size, size_t *record_counter)
  * If any member is missing, it exits with a failure status.
  */
 void
-print_missing_members(struct Args* args, bool* is_present)
+print_missing_members(struct Args *args, bool *is_present)
 {
 	bool missing_found = false;
 	if (args->member_count > 0) {
@@ -397,9 +398,8 @@ print_missing_members(struct Args* args, bool* is_present)
  * write - important for the last record, which may be less than RECORD_SIZE.
  */
 void
-data_rw(FILE* input_fp, FILE* output_fp, char* buffer, size_t amount)
+data_rw(FILE *input_fp, FILE *output_fp, char *buffer, size_t amount)
 {
-	//memset(buffer, '\0', RECORD_SIZE);
 	size_t r = fread(buffer, sizeof (char), RECORD_SIZE, input_fp);
 	if (r != RECORD_SIZE) {
 		if (feof(input_fp)) {
@@ -419,23 +419,32 @@ data_rw(FILE* input_fp, FILE* output_fp, char* buffer, size_t amount)
 }
 
 void
-extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
+extract_file(FILE *fp, struct TarHeader *header, size_t *record_counter)
 {
 	char full_name[NAME_LENGTH + PREFIX_LENGTH + 2] = {0};
 	if (header->prefix[0] != '\0') {
-		snprintf(full_name, sizeof(full_name), "%s/%s", header->prefix, header->name);
+		snprintf(
+			full_name,
+			sizeof (full_name),
+			"%s/%s",
+			header->prefix,
+			header->name);
 	} else {
-		snprintf(full_name, sizeof(full_name), "%s", header->name);
+		snprintf(
+			full_name,
+			sizeof (full_name),
+			"%s",
+			header->name);
 	}
 
-	FILE* extracted_fp = fopen(full_name, "w");
+	FILE *extracted_fp = fopen(full_name, "w");
 	if (extracted_fp == NULL)
 		err(2, "Error opening file for writing: %s", full_name);
 	size_t data_record_amount = (RECORD_SIZE - 1 + header->size) / RECORD_SIZE;
 	size_t remainder = header->size % RECORD_SIZE;
 	if (remainder == 0)
 		remainder = RECORD_SIZE;
-	char* buffer = malloc(RECORD_SIZE);
+	char *buffer = malloc(RECORD_SIZE);
 	for (size_t i = 0; i < data_record_amount; ++i) {
 		*record_counter += 1;
 		if (i < data_record_amount - 1)
@@ -448,13 +457,13 @@ extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
 }
 
 /*
- * Checks if the file should be handled based on the command line arguments.
- * It also updates the is_present array accordingly.
+ * Checks if the member file should be handled based on the command line
+ * arguments. It also updates the is_present array accordingly.
  */
 bool
-should_handle_archive_file(
-	struct Args* args,
-	struct TarHeader* header,
+should_handle_member(
+	struct Args *args,
+	struct TarHeader *header,
 	bool* is_present)
 {
 	if (args->member_count == 0)
@@ -474,7 +483,7 @@ should_handle_archive_file(
  * command line arguments. If the member is not present, a warning is printed.
  */
 void
-traverse_archive (FILE* fp, struct Args* args)
+traverse_archive(FILE *fp, struct Args *args)
 {
 	rewind(fp);
 	struct TarHeader read;
@@ -491,9 +500,8 @@ traverse_archive (FILE* fp, struct Args* args)
 	size_t record_counter = 0;
 	while (
 		read_header(fp, &read, &EOF_reached, &record_counter),
-		!is_end_of_archive(fp, &read, &EOF_reached, &record_counter)
-	) {
-		bool should_handle = should_handle_archive_file(args, &read, is_present);
+		!is_end_of_archive(fp, &read, &EOF_reached, &record_counter)) {
+		bool should_handle = should_handle_member(args, &read, is_present);
 
 		if (args->should_list) {
 			if (should_handle)
@@ -515,10 +523,10 @@ traverse_archive (FILE* fp, struct Args* args)
 }
 
 int
-main(int argc, char* argv[])
+main(int argc, char *argv[])
 {
 	struct Args args = parse_arguments(argc, argv);
-	FILE* fp;
+	FILE *fp;
 	if ((fp = fopen(args.output_file, "r")) == NULL)
 		err(2, "Error opening file: %s", args.output_file);
 
