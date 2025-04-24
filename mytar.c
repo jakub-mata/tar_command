@@ -35,7 +35,7 @@ struct Args {
 };
 
 /* An enum of possible flags */
-enum ArgOption { None = 0, Filename = 0b1, List = 0b10 };
+enum ArgOption { None = 0, Filename = 0b1, List = 0b10, Extract = 0b100 };
 
 void
 add_member(struct Args* args, char* member)
@@ -68,6 +68,7 @@ parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 			if (args->should_extract)
 				errx(2, "Incompatible flags passed in");
 			args->should_list = true;
+			args->is_verbose = true; // implicit
 			if (*options == Filename && args->output_file == NULL)
 				errx(2, "-t flag set before archive filename");
 			*options |= List;
@@ -78,6 +79,7 @@ parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 		case 'x':
 			if (args->should_list)
 				errx(2, "Incompatible flags passed in");
+			*options |= Extract;
 			args->should_extract = true;
 			break;
 		case 'v':
@@ -128,7 +130,7 @@ parse_arguments(int argc, char** argv)
 		if (parsed.output_file == NULL) {
 			parsed.output_file = argv[i];
 			parsed.is_valid = true;
-		} else if ((options & List) != 0) {
+		} else if ((options & (List | Extract)) != 0) {
 			add_member(&parsed, argv[i]);
 		} else
 			errx(2, "Value provided without option: %s", argv[i]);
@@ -289,6 +291,19 @@ read_header(
 	*record_counter += 1;
 }
 
+size_t
+read_data(FILE* fp, char* buffer)
+{
+	size_t read = fread(buffer, 1, RECORD_SIZE, fp);
+	if (read != RECORD_SIZE) {
+		if (feof(fp))
+			warnx("Unexpected EOF in archive");
+		else
+			warn("fread");
+	}
+	return read;
+}
+
 void
 print_header(struct TarHeader* header)
 {
@@ -407,8 +422,40 @@ print_members(struct Args* args, bool* is_present)
 	}
 }
 
+void write_data(FILE* output_fp, char* buffer, size_t amount)
+{
+	size_t written = fwrite(buffer, sizeof (char), amount, output_fp);
+	if (written != amount) {
+		fflush(output_fp);
+		errx(2, "fwrite");
+	}
+		
+}
+
 void
-list_archive(FILE* fp, struct Args* args)
+extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
+{
+	FILE* extracted_fp = fopen(header->name, "w");  // MAKE SURE TO CHECK FOR PREFIX
+	if (extracted_fp == NULL)
+		errx(2, "fopen");
+	size_t data_record_amount = (RECORD_SIZE - 1 + header->size) / RECORD_SIZE;
+	size_t remainder = header->size % RECORD_SIZE;
+	char* buffer = malloc(RECORD_SIZE);
+	for (size_t i = 0; i < data_record_amount; ++i) {
+		*record_counter += 1;
+		size_t read = read_data(fp, buffer);
+		i < data_record_amount - 1
+			? write_data(extracted_fp, buffer, read)
+			: write_data(extracted_fp, buffer, read < remainder ? read : remainder);
+		if (read != RECORD_SIZE)
+			errx(2, "Error is not recoverable: exiting now");
+	}
+	free(buffer);
+	fclose(extracted_fp);
+}
+
+void
+traverse_archive (FILE* fp, struct Args* args)
 {
 	rewind(fp);
 	struct TarHeader read;
@@ -428,18 +475,29 @@ list_archive(FILE* fp, struct Args* args)
 		#ifdef DEBUG
 			printf("**********\n");
 		#endif
-		bool should_print = (args->member_count == 0);
+		bool should_handle = (args->member_count == 0) && (args->is_verbose) && 
+			((args->should_list) || (args->should_extract));
 		for (int i = 0; i < args->member_count; ++i) {
 			if (strcmp(read.name, args->members[i]) == 0) {
-				should_print = true;
-				is_present[i] = true;
+				should_handle = true;
+				*(is_present + i) = true;
 				break;
 			}
 		}
-		if (should_print)
-			print_header(&read);
 
-		skip_data_records(fp, read.size, &record_counter);
+		if (args->should_list) {
+			if (should_handle)
+				print_header(&read);
+			skip_data_records(fp, read.size, &record_counter);
+		} else if (args->should_extract) {
+			if (should_handle) {
+				if (args->is_verbose)
+					print_header(&read);
+				extract_file(fp, &read, &record_counter);
+			} else {
+				skip_data_records(fp, read.size, &record_counter);
+			}
+		}
 	}
 
 	#ifdef DEBUG
@@ -448,12 +506,6 @@ list_archive(FILE* fp, struct Args* args)
 	#endif
 	print_members(args, is_present);
 	free(is_present);
-}
-
-void
-extract_archive(FILE* fp, struct Args* args)
-{
-
 }
 
 int
@@ -476,8 +528,8 @@ main(int argc, char* argv[])
 	if ((fp = fopen(args.output_file, "r")) == NULL)
 		err(2, "fopen");
 
-	if (args.should_list)
-		list_archive(fp, &args);
+	if (args.should_list || args.should_extract)
+		traverse_archive(fp, &args);
 
 	free(args.members);
 	fclose(fp);
