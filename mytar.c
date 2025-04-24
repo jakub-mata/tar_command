@@ -68,7 +68,6 @@ parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 			if (args->should_extract)
 				errx(2, "Incompatible flags passed in");
 			args->should_list = true;
-			args->is_verbose = true; // implicit
 			if (*options == Filename && args->output_file == NULL)
 				errx(2, "-t flag set before archive filename");
 			*options |= List;
@@ -177,6 +176,16 @@ read_char_based(FILE* fp, char* buffer, size_t size)
 	}
 }
 
+size_t
+to_base_256(char* buffer, size_t buffer_size)
+{
+	size_t result = 0;
+	for (size_t i = 1; i < buffer_size; ++i) {
+		result = (result << 8) | (unsigned char)buffer[i];
+	}
+	return result;
+}
+
 /*
  * Reads an integer from the file pointer and returns it. The integer is read
  * as a string of octal digits, and then converted to anunsigned long long.
@@ -198,10 +207,7 @@ read_integer_based(FILE* fp, size_t size)
 	int first_bit_mask = 0b10000000;
 	// Files over 8G extension (star(1) extension)
 	if ((buffer[0] & first_bit_mask) == first_bit_mask) {
-		// represented in base 256
-		buffer[0] &= 0b01111111;  // clear the sign bit
-		printf("Base 256\n");
-		return (strtoull(buffer, NULL, 256));
+		return to_base_256(buffer, size);
 	}
 	// represented in octal
 	return (strtoull(buffer, NULL, 8));
@@ -249,9 +255,6 @@ read_header(
 	size_t* record_counter)
 {
 	if (check_EOF(fp)) {
-		#ifdef DEBUG
-			printf("Unexpected EOF\n");
-		#endif
 		*EOF_reached = true;
 		return;
 	}
@@ -289,19 +292,6 @@ read_header(
 	read_char_based(fp, void_buffer, TRAILING_PADDING);
 
 	*record_counter += 1;
-}
-
-size_t
-read_data(FILE* fp, char* buffer)
-{
-	size_t read = fread(buffer, 1, RECORD_SIZE, fp);
-	if (read != RECORD_SIZE) {
-		if (feof(fp))
-			warnx("Unexpected EOF in archive");
-		else
-			warn("fread");
-	}
-	return read;
 }
 
 void
@@ -355,9 +345,6 @@ is_end_of_archive(
 		return (true);
 	/* End of archive defined as two consecutive empty records (headers) */
 	if (is_header_empty(header)) {
-		#ifdef DEBUG
-			printf("\tFirst record empty\n");
-		#endif
 		/* The first record is empty, check the next one */
 		read_header(fp, header, EOF_reached, record_counter);
 		if (*EOF_reached) {
@@ -365,15 +352,9 @@ is_end_of_archive(
 			return (true);
 		}
 		if (is_header_empty(header)) {
-			#ifdef DEBUG
-				printf("\tSecond record empty\n");
-			#endif
 			/* Two consecutive empty record => end of the archive */
 			return (true);
 		}
-		#ifdef DEBUG
-			printf("\tSecond record NOT empty\n");
-		#endif
 		/* The second record is not empty */
 		/* Print the first archive to the console */
 		struct TarHeader empty_header = {0};
@@ -387,10 +368,6 @@ void
 skip_data_records(FILE* fp, size_t size, size_t *record_counter)
 {
 	size_t data_record_amount = (RECORD_SIZE - 1 + size) / RECORD_SIZE;
-	#ifdef DEBUG
-		printf("\tData record amount: %zu\n", data_record_amount);
-	#endif
-
 	/* Reads all data blocks except for last character */
 	int ok = fseek(fp, RECORD_SIZE * data_record_amount - 1, SEEK_CUR);
 	if (ok != 0)
@@ -422,33 +399,56 @@ print_members(struct Args* args, bool* is_present)
 	}
 }
 
-void write_data(FILE* output_fp, char* buffer, size_t amount)
+void
+data_rw(FILE* input_fp, FILE* output_fp, char* buffer, size_t amount)
 {
-	size_t written = fwrite(buffer, sizeof (char), amount, output_fp);
-	if (written != amount) {
-		fflush(output_fp);
-		errx(2, "fwrite");
+	memset(buffer, '\0', RECORD_SIZE);
+	size_t r = fread(buffer, sizeof (char), RECORD_SIZE, input_fp);
+	if (r != RECORD_SIZE) {
+		if (feof(input_fp)) {
+			warnx("Unexpected EOF in archive");
+			fwrite(buffer, r, 1, output_fp);  // write what was read
+			fflush(output_fp);
+			errx(2, "Error is not recoverable: exiting now");
+		}
+		else
+			err(2, "fread");
 	}
-		
+	size_t w = fwrite(buffer, amount, 1, output_fp);
+	if (w != 1) {
+		fflush(output_fp);
+		err(2, "fwrite");
+	}
 }
 
 void
 extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
 {
-	FILE* extracted_fp = fopen(header->name, "w");  // MAKE SURE TO CHECK FOR PREFIX
+	char full_name[NAME_LENGTH + PREFIX_LENGTH + 2] = {0};
+	if (header->prefix[0] != '\0') {
+		snprintf(full_name, sizeof(full_name), "%s/%s", header->prefix, header->name);
+	} else {
+		snprintf(full_name, sizeof(full_name), "%s", header->name);
+	}
+
+	FILE* extracted_fp = fopen(full_name, "w");
 	if (extracted_fp == NULL)
 		errx(2, "fopen");
 	size_t data_record_amount = (RECORD_SIZE - 1 + header->size) / RECORD_SIZE;
 	size_t remainder = header->size % RECORD_SIZE;
+	if (remainder == 0)
+		remainder = RECORD_SIZE;
+	#ifdef DEBUG
+		printf("\tData record amount: %zu\n", data_record_amount);
+		printf("\tRemainder: %zu\n", remainder);
+	#endif
 	char* buffer = malloc(RECORD_SIZE);
 	for (size_t i = 0; i < data_record_amount; ++i) {
 		*record_counter += 1;
-		size_t read = read_data(fp, buffer);
-		i < data_record_amount - 1
-			? write_data(extracted_fp, buffer, read)
-			: write_data(extracted_fp, buffer, read < remainder ? read : remainder);
-		if (read != RECORD_SIZE)
-			errx(2, "Error is not recoverable: exiting now");
+		if (i < data_record_amount - 1)
+			data_rw(fp, extracted_fp, buffer, RECORD_SIZE);
+		else
+			data_rw(fp, extracted_fp, buffer, remainder);
 	}
 	free(buffer);
 	fclose(extracted_fp);
@@ -473,9 +473,9 @@ traverse_archive (FILE* fp, struct Args* args)
 		!is_end_of_archive(fp, &read, &EOF_reached, &record_counter)
 	) {
 		#ifdef DEBUG
-			printf("**********\n");
+			printf("***************");
 		#endif
-		bool should_handle = (args->member_count == 0) && (args->is_verbose) && 
+		bool should_handle = (args->member_count == 0) &&
 			((args->should_list) || (args->should_extract));
 		for (int i = 0; i < args->member_count; ++i) {
 			if (strcmp(read.name, args->members[i]) == 0) {
@@ -499,11 +499,6 @@ traverse_archive (FILE* fp, struct Args* args)
 			}
 		}
 	}
-
-	#ifdef DEBUG
-		printf("**********\n");
-		printf("End of archive\n");
-	#endif
 	print_members(args, is_present);
 	free(is_present);
 }
@@ -514,16 +509,18 @@ main(int argc, char* argv[])
 	struct Args args = parse_arguments(argc, argv);
 	if (!args.is_valid)
 		errx(2, "%s", "Provided arguments are not valid");
-
 	#ifdef DEBUG
 		printf("Output file: %s\n", args.output_file);
-		printf("Should list: %d\n", args.should_list);
+		printf("Members: ");
 		for (int i = 0; i < args.member_count; ++i)
-			printf("Member %d: %s\n", i, args.members[i]);
+			printf("%s ", args.members[i]);
+		printf("\n");
+		printf("Should list: %d\n", args.should_list);
+		printf("Should extract: %d\n", args.should_extract);
+		printf("Is verbose: %d\n", args.is_verbose);
+		printf("Is valid: %d\n", args.is_valid);
 		printf("Member count: %d\n", args.member_count);
-		printf("**********\n");
 	#endif
-
 	FILE* fp;
 	if ((fp = fopen(args.output_file, "r")) == NULL)
 		err(2, "fopen");
