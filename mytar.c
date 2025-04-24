@@ -22,10 +22,11 @@
 #define	TRAILING_PADDING 12
 #define	RECORD_SIZE 512
 
-/* ARGUMENT PARSING */
+/* ===========================
+ * ARGUMENT STRUCTURES
+ * =========================== */
 
 struct Args {
-	bool is_valid;
 	char* output_file;
 	char** members;
 	int member_count;
@@ -34,61 +35,55 @@ struct Args {
 	bool is_verbose;
 };
 
-/* An enum of possible flags */
-enum ArgOption { None = 0, Filename = 0b1, List = 0b10, Extract = 0b100 };
+enum ArgOption {
+    None = 0,         // No option provided
+    Filename = 0b1,   // Output tar archive file name specified
+    List = 0b10,      // List contents of the archive
+    Extract = 0b100   // Extract files from the archive
+};
 
+
+/* ===========================
+ * ARGUMENT UTILITIES
+ * =========================== */
+
+/* Adds a file member to the args structure */
 void
-add_member(struct Args* args, char* member)
-{
-	args->members[args->member_count] = member;
-	args->member_count++;
+add_member(struct Args* args, char* member) {
+    if (!args || !member) {
+        fprintf(stderr, "Error: Null pointer passed to add_member.\n");
+        return;
+    }
+    args->members[args->member_count] = member;
+    args->member_count++;
 }
 
-/*
- * Parses a flag from the command line arguments and modifies the provided
- * struct Args. A flag is an argument starting with '-', this initial dash
- * is skipped before calling this function.
- * Parameters:
- * - args: pointer to the struct Args to modify
- * - flag: the flag to parse (e.g. "farchive.tar", "f", "t", "tfile.txt")
- * - options: pointer to the enum ArgOption to modify
- */
+/* Parse a single flag and update args and options accordingly */
 void
 parse_flag(struct Args* args, char* flag, enum ArgOption* options)
 {
 	switch (*flag) {
-		case 'f':
-			args->is_valid = true;
-			*options |= Filename;
-			++flag;
-			if (*flag != '\0')
-				args->output_file = flag;
-			break;
-		case 't':
-			if (args->should_extract)
-				errx(2, "Incompatible flags passed in");
-			args->should_list = true;
-			if (*options == Filename && args->output_file == NULL)
-				errx(2, "-t flag set before archive filename");
-			*options |= List;
-			++flag;
-			if (*flag != '\0')
-				add_member(args, flag);
-		    break;
-		case 'x':
-			if (args->should_list)
-				errx(2, "Incompatible flags passed in");
-			*options |= Extract;
-			args->should_extract = true;
-			break;
-		case 'v':
-			args->is_verbose = true;
-			break;
-		default:
-			errx(2, "Unknown option: %s", flag);
+		case 'f': *options |= Filename; break;
+		case 't': args->should_list = true; *options |= List; break;
+		case 'x': args->should_extract = true; *options |= Extract; break;
+		case 'v': args->is_verbose = true; break;
+		default: errx(2, "Unknown option: %c", *flag);
 	}
 }
 
+void validate_args(struct Args* args, enum ArgOption options)
+{
+	if (args == NULL) {
+		errx(2, "Null pointer passed to validate_args.\n");
+		return;
+	}
+	if ((options & Filename) == 0)
+		errx(2, "No output file specified");
+	if ((options & (List | Extract)) == 0)
+		errx(2, "No action specified: -t or -x");
+	if (args->should_list && args->should_extract)
+		errx(2, "Cannot list and extract at the same time");
+}
 
 /*
  * Parses cl arguments and returns a struct Args with the parsed values.
@@ -98,7 +93,6 @@ struct Args
 parse_arguments(int argc, char** argv)
 {
 	struct Args parsed = {
-		.is_valid = false,
 		.output_file = NULL,
 		.should_list = false,
 		.members = NULL,
@@ -126,19 +120,20 @@ parse_arguments(int argc, char** argv)
 		if ((options & Filename) == 0)
 			errx(2, "Value provided without option: %s", argv[i]);
 
-		if (parsed.output_file == NULL) {
+		if (parsed.output_file == NULL)
 			parsed.output_file = argv[i];
-			parsed.is_valid = true;
-		} else if ((options & (List | Extract)) != 0) {
+		else
 			add_member(&parsed, argv[i]);
-		} else
-			errx(2, "Value provided without option: %s", argv[i]);
 	}
+	validate_args(&parsed, options);
 	return (parsed);
 }
 
 
-/* ACTUAL TAR PROGRAM */
+/* ===========================
+ * MAIN TAR LOGIC
+ * =========================== */
+
 
 struct TarHeader
 {
@@ -160,9 +155,7 @@ struct TarHeader
 	char prefix[PREFIX_LENGTH + 1];
 };
 
-/*
- * Reads a fixed number of characters from the file pointer into the buffer.
- */
+/* Reads a fixed number of characters from the file pointer into the buffer. */
 void
 read_char_based(FILE* fp, char* buffer, size_t size)
 {
@@ -176,6 +169,10 @@ read_char_based(FILE* fp, char* buffer, size_t size)
 	}
 }
 
+/*
+ * Converts a string of octal digits to an unsigned long long integer.
+ * The first bit is used to determine if the number is in base 256.
+ */
 size_t
 to_base_256(char* buffer, size_t buffer_size)
 {
@@ -227,6 +224,10 @@ read_char(FILE* fp)
 	return (c);
 }
 
+/*
+ * Checks if the end of the file has been reached. Returns true if EOF is
+ * reached, false otherwise.
+ */
 bool
 check_EOF(FILE* fp)
 {
@@ -244,8 +245,9 @@ check_EOF(FILE* fp)
 }
 
 /*
- * Reads a tar header from the file pointer. Returns true if the header was
- * read successfully, false if EOF reached at first character.
+ * Reads a tar header from the file pointer. The header is read into the
+ * provided TarHeader structure. The function also updates the EOF_reached
+ * and record_counter variables.
  */
 void
 read_header(
@@ -259,7 +261,6 @@ read_header(
 		return;
 	}
 	memset(header, 0, sizeof (*header));  /* Initialize header to zero */
-	// Read name
 	read_char_based(fp, header->name, NAME_LENGTH);
 	header->mode = read_integer_based(fp, MODE_LENGTH);
 	header->uid = read_integer_based(fp, UID_LENGTH);
@@ -274,9 +275,6 @@ read_header(
 	read_char_based(fp, header->magic, MAGIC_LENGTH);
 	if (*header->magic != '\0'
 		&& strncmp(header->magic, "ustar", MAGIC_LENGTH - 1) != 0) {
-		#ifdef DEBUG
-			printf("Magic: %s\n", header->magic);
-		#endif
 		warnx("This does not look like a tar archive");
 		errx(2, "Exiting with failure status due to previous errors");
 	}
@@ -300,23 +298,6 @@ print_header(struct TarHeader* header)
 	if (header->prefix[0] != '\0')
 		printf("%s/", header->prefix);
 	printf("%s\n", header->name);
-	#ifdef DEBUG
-		printf("Mode: %zu\n", header->mode);
-		printf("UID: %zu\n", header->uid);
-		printf("GID: %zu\n", header->gid);
-		printf("Size: %zu\n", header->size);
-		printf("MTIME: %zu\n", header->mtime);
-		printf("CHKSUM: %zu\n", header->chksum);
-		printf("Typeflag: %c\n", header->typeflag);
-		printf("Linkname: %s\n", header->linkname);
-		printf("Magic: %s\n", header->magic);
-		printf("Version: %s\n", header->version);
-		printf("Uname: %s\n", header->uname);
-		printf("Gname: %s\n", header->gname);
-		printf("Devmajor: %zu\n", header->devmajor);
-		printf("Devminor: %zu\n", header->devminor);
-		printf("Prefix: %s\n", header->prefix);
-	#endif
 }
 
 bool
@@ -334,6 +315,11 @@ is_header_empty(struct TarHeader* header)
 	return (false);
 }
 
+/*
+ * Checks if the end of the archive has been reached. The end of the archive
+ * is defined as two consecutive empty records (headers). If EOF is reached,
+ * it sets EOF_reached to true and returns true. Otherwise, it returns false.
+ */
 bool
 is_end_of_archive(
 	FILE* fp,
@@ -343,7 +329,6 @@ is_end_of_archive(
 {
 	if (*EOF_reached)
 		return (true);
-	/* End of archive defined as two consecutive empty records (headers) */
 	if (is_header_empty(header)) {
 		/* The first record is empty, check the next one */
 		read_header(fp, header, EOF_reached, record_counter);
@@ -364,6 +349,7 @@ is_end_of_archive(
 	return (false);
 }
 
+/* Skips the data records in the tar archive. */
 void
 skip_data_records(FILE* fp, size_t size, size_t *record_counter)
 {
@@ -382,8 +368,12 @@ skip_data_records(FILE* fp, size_t size, size_t *record_counter)
 	*record_counter += data_record_amount;
 }
 
+/*
+ * Prints the names of the members that were not found in the archive.
+ * If any member is missing, it exits with a failure status.
+ */
 void
-print_members(struct Args* args, bool* is_present)
+print_missing_members(struct Args* args, bool* is_present)
 {
 	bool missing_found = false;
 	if (args->member_count > 0) {
@@ -399,6 +389,11 @@ print_members(struct Args* args, bool* is_present)
 	}
 }
 
+/*
+ * Reads a data record from the input file pointer and writes it to the
+ * output file pointer. The amount parameter specifies the number of bytes to
+ * write - important for the last record, which may be less than RECORD_SIZE.
+ */
 void
 data_rw(FILE* input_fp, FILE* output_fp, char* buffer, size_t amount)
 {
@@ -438,10 +433,6 @@ extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
 	size_t remainder = header->size % RECORD_SIZE;
 	if (remainder == 0)
 		remainder = RECORD_SIZE;
-	#ifdef DEBUG
-		printf("\tData record amount: %zu\n", data_record_amount);
-		printf("\tRemainder: %zu\n", remainder);
-	#endif
 	char* buffer = malloc(RECORD_SIZE);
 	for (size_t i = 0; i < data_record_amount; ++i) {
 		*record_counter += 1;
@@ -454,12 +445,17 @@ extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
 	fclose(extracted_fp);
 }
 
+/*
+ * Traverses the tar archive and processes each member. If the member is
+ * present in the archive, it is either listed or extracted, depending on the
+ * command line arguments. If the member is not present, a warning is printed.
+ */
 void
 traverse_archive (FILE* fp, struct Args* args)
 {
 	rewind(fp);
 	struct TarHeader read;
-	/* Initialize array showing if the member is present */
+	/* Initialize array showing whether the member is present */
 	bool* is_present = malloc(sizeof (bool) * args->member_count);
 	if (is_present == NULL && args->member_count > 0)
 		err(2, "malloc");
@@ -472,9 +468,6 @@ traverse_archive (FILE* fp, struct Args* args)
 		read_header(fp, &read, &EOF_reached, &record_counter),
 		!is_end_of_archive(fp, &read, &EOF_reached, &record_counter)
 	) {
-		#ifdef DEBUG
-			printf("***************");
-		#endif
 		bool should_handle = (args->member_count == 0) &&
 			((args->should_list) || (args->should_extract));
 		for (int i = 0; i < args->member_count; ++i) {
@@ -499,7 +492,7 @@ traverse_archive (FILE* fp, struct Args* args)
 			}
 		}
 	}
-	print_members(args, is_present);
+	print_missing_members(args, is_present);
 	free(is_present);
 }
 
@@ -507,20 +500,6 @@ int
 main(int argc, char* argv[])
 {
 	struct Args args = parse_arguments(argc, argv);
-	if (!args.is_valid)
-		errx(2, "%s", "Provided arguments are not valid");
-	#ifdef DEBUG
-		printf("Output file: %s\n", args.output_file);
-		printf("Members: ");
-		for (int i = 0; i < args.member_count; ++i)
-			printf("%s ", args.members[i]);
-		printf("\n");
-		printf("Should list: %d\n", args.should_list);
-		printf("Should extract: %d\n", args.should_extract);
-		printf("Is verbose: %d\n", args.is_verbose);
-		printf("Is valid: %d\n", args.is_valid);
-		printf("Member count: %d\n", args.member_count);
-	#endif
 	FILE* fp;
 	if ((fp = fopen(args.output_file, "r")) == NULL)
 		err(2, "fopen");
