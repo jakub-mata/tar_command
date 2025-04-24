@@ -22,6 +22,8 @@
 #define	TRAILING_PADDING 12
 #define	RECORD_SIZE 512
 
+#define MAGIC "ustar"
+
 /* ===========================
  * ARGUMENT STRUCTURES
  * =========================== */
@@ -159,13 +161,13 @@ struct TarHeader
 void
 read_char_based(FILE* fp, char* buffer, size_t size)
 {
-	size_t read = fread(buffer, sizeof (buffer[0]), size, fp);
+	size_t read = fread(buffer, sizeof (char), size, fp);
 	buffer[size] = '\0';  /* Null-terminate the string */
 	if (read != size) {
 		if (feof(fp))
 			errx(2, "Unexpected EOF in archive");
 		else
-			errx(2, "read_char_based");
+			errx(2, "Error reading character");
 	}
 }
 
@@ -197,7 +199,7 @@ read_integer_based(FILE* fp, size_t size)
 		if (feof(fp))
 			errx(2, "Unexpected EOF in archive");
 		else {
-			errx(2, "read_integer_based");
+			errx(2, "Error reading integer");
 		}
 	}
 
@@ -219,7 +221,7 @@ read_char(FILE* fp)
 		if (feof(fp))
 			errx(2, "Unexpected EOF in archive");
 		else
-			errx(2, "read_typeflag");
+			errx(2, "Error reading character");
 	}
 	return (c);
 }
@@ -236,12 +238,12 @@ check_EOF(FILE* fp)
 	if (feof(fp))
 		return (true);
 	if (read == 0)
-		errx(2, "check_EOF");
+		errx(2, "Error in check_EOF other than EOF");
 	if (read == 1) {
 		ungetc(c, fp);  // put the character back
 		return (false);
 	}
-	errx(2, "check_EOF");
+	errx(2, "Error in check_EOF other than EOF");
 }
 
 /*
@@ -274,7 +276,7 @@ read_header(
 	read_char_based(fp, header->linkname, LINKNAME_LENGTH);
 	read_char_based(fp, header->magic, MAGIC_LENGTH);
 	if (*header->magic != '\0'
-		&& strncmp(header->magic, "ustar", MAGIC_LENGTH - 1) != 0) {
+		&& strncmp(header->magic, MAGIC, MAGIC_LENGTH - 1) != 0) {
 		warnx("This does not look like a tar archive");
 		errx(2, "Exiting with failure status due to previous errors");
 	}
@@ -357,7 +359,7 @@ skip_data_records(FILE* fp, size_t size, size_t *record_counter)
 	/* Reads all data blocks except for last character */
 	int ok = fseek(fp, RECORD_SIZE * data_record_amount - 1, SEEK_CUR);
 	if (ok != 0)
-		errx(2, "fseek");
+		errx(2, "Error seeking in archive");
 	/* Last char checked for EOF */
 	char test_c = fgetc(fp);
 	if (test_c == EOF) {
@@ -397,7 +399,7 @@ print_missing_members(struct Args* args, bool* is_present)
 void
 data_rw(FILE* input_fp, FILE* output_fp, char* buffer, size_t amount)
 {
-	memset(buffer, '\0', RECORD_SIZE);
+	//memset(buffer, '\0', RECORD_SIZE);
 	size_t r = fread(buffer, sizeof (char), RECORD_SIZE, input_fp);
 	if (r != RECORD_SIZE) {
 		if (feof(input_fp)) {
@@ -407,12 +409,12 @@ data_rw(FILE* input_fp, FILE* output_fp, char* buffer, size_t amount)
 			errx(2, "Error is not recoverable: exiting now");
 		}
 		else
-			err(2, "fread");
+			err(2, "Error reading data record");
 	}
 	size_t w = fwrite(buffer, amount, 1, output_fp);
 	if (w != 1) {
 		fflush(output_fp);
-		err(2, "fwrite");
+		err(2, "Error writing to output file");
 	}
 }
 
@@ -428,7 +430,7 @@ extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
 
 	FILE* extracted_fp = fopen(full_name, "w");
 	if (extracted_fp == NULL)
-		errx(2, "fopen");
+		err(2, "Error opening file for writing: %s", full_name);
 	size_t data_record_amount = (RECORD_SIZE - 1 + header->size) / RECORD_SIZE;
 	size_t remainder = header->size % RECORD_SIZE;
 	if (remainder == 0)
@@ -446,6 +448,27 @@ extract_file(FILE* fp, struct TarHeader* header, size_t* record_counter)
 }
 
 /*
+ * Checks if the file should be handled based on the command line arguments.
+ * It also updates the is_present array accordingly.
+ */
+bool
+should_handle_archive_file(
+	struct Args* args,
+	struct TarHeader* header,
+	bool* is_present)
+{
+	if (args->member_count == 0)
+		return (true);
+	for (int i = 0; i < args->member_count; ++i) {
+		if (strcmp(header->name, args->members[i]) == 0) {
+			*(is_present + i) = true;
+			return (true);
+		}
+	}
+	return (false);
+}
+
+/*
  * Traverses the tar archive and processes each member. If the member is
  * present in the archive, it is either listed or extracted, depending on the
  * command line arguments. If the member is not present, a warning is printed.
@@ -456,9 +479,11 @@ traverse_archive (FILE* fp, struct Args* args)
 	rewind(fp);
 	struct TarHeader read;
 	/* Initialize array showing whether the member is present */
-	bool* is_present = malloc(sizeof (bool) * args->member_count);
+	bool* is_present = args->member_count > 0
+		? malloc(sizeof (bool) * args->member_count)
+		: NULL;
 	if (is_present == NULL && args->member_count > 0)
-		err(2, "malloc");
+		err(2, "Error allocating memory");
 	for (int i = 0; i < args->member_count; ++i)
 		is_present[i] = false;
 
@@ -468,15 +493,7 @@ traverse_archive (FILE* fp, struct Args* args)
 		read_header(fp, &read, &EOF_reached, &record_counter),
 		!is_end_of_archive(fp, &read, &EOF_reached, &record_counter)
 	) {
-		bool should_handle = (args->member_count == 0) &&
-			((args->should_list) || (args->should_extract));
-		for (int i = 0; i < args->member_count; ++i) {
-			if (strcmp(read.name, args->members[i]) == 0) {
-				should_handle = true;
-				*(is_present + i) = true;
-				break;
-			}
-		}
+		bool should_handle = should_handle_archive_file(args, &read, is_present);
 
 		if (args->should_list) {
 			if (should_handle)
@@ -493,7 +510,8 @@ traverse_archive (FILE* fp, struct Args* args)
 		}
 	}
 	print_missing_members(args, is_present);
-	free(is_present);
+	if (args->member_count > 0)
+		free(is_present);
 }
 
 int
@@ -502,7 +520,7 @@ main(int argc, char* argv[])
 	struct Args args = parse_arguments(argc, argv);
 	FILE* fp;
 	if ((fp = fopen(args.output_file, "r")) == NULL)
-		err(2, "fopen");
+		err(2, "Error opening file: %s", args.output_file);
 
 	if (args.should_list || args.should_extract)
 		traverse_archive(fp, &args);
