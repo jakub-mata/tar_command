@@ -38,7 +38,7 @@ struct Args {
 };
 
 enum ArgOption {
-	None = 0,			// No option provided
+	None = 0,		// No option provided
     Filename = 0b1,		// Output tar archive file name specified
 	List = 0b10,		// List contents of the archive
     Extract = 0b100		// Extract files from the archive
