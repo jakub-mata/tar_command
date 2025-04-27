@@ -51,13 +51,14 @@ enum ArgOption {
 
 /* Adds a file member to the args structure */
 void
-add_member(struct Args *args, char *member) {
-    if (!args || !member) {
+add_member(struct Args *args, char *member)
+{
+	if (!args || !member) {
 		fprintf(stderr, "Error: Null pointer passed to add_member.\n");
 		return;
 	}
-    args->members[args->member_count] = member;
-    args->member_count++;
+	args->members[args->member_count] = member;
+	args->member_count++;
 }
 
 /* Parse a single flag and update args and options accordingly */
@@ -65,11 +66,22 @@ void
 parse_flag(struct Args *args, char *flag, enum ArgOption *options)
 {
 	switch (*flag) {
-		case 'f': *options |= Filename; break;
-		case 't': args->should_list = true; *options |= List; break;
-		case 'x': args->should_extract = true; *options |= Extract; break;
-		case 'v': args->is_verbose = true; break;
-		default: errx(2, "Unknown option: %c", *flag);
+		case 'f':
+			*options |= Filename;
+			break;
+		case 't':
+			args->should_list = true;
+			*options |= List;
+			break;
+		case 'x':
+			args->should_extract = true;
+			*options |= Extract;
+			break;
+		case 'v':
+			args->is_verbose = true;
+			break;
+		default:
+			errx(2, "Unknown option: %c", *flag);
 	}
 }
 
@@ -276,10 +288,11 @@ read_header(
 		errx(2, "Unsupported header type: %d", header->typeflag);
 	read_char_based(fp, header->linkname, LINKNAME_LENGTH);
 	read_char_based(fp, header->magic, MAGIC_LENGTH);
-	if (*header->magic != '\0'
-		&& strncmp(header->magic, MAGIC, MAGIC_LENGTH - 1) != 0) {
-		warnx("This does not look like a tar archive");
-		errx(2, "Exiting with failure status due to previous errors");
+	if (*header->magic != '\0') {
+		if (strncmp(header->magic, MAGIC, MAGIC_LENGTH - 1) != 0) {
+			warnx("This does not look like a tar archive");
+			errx(2, "Exiting with failure status due to previous errors");
+		}
 	}
 	read_char_based(fp, header->version, VERSION_LENGTH);
 	read_char_based(fp, header->uname, UNAME_LENGTH);
@@ -383,12 +396,13 @@ print_missing_members(struct Args *args, bool *is_present)
 		for (int i = 0; i < args->member_count; ++i) {
 			if (!is_present[i]) {
 				missing_found = true;
-				warnx("%s: Not found in archive", args->members[i]);
+				warnx(
+					"%s: Not found in archive",
+					args->members[i]);
 			}
 		}
 		if (missing_found)
-			errx(
-				2, "Exiting with failure status due to previous errors");
+			errx(2, "Exiting with failure status due to previous errors");
 	}
 }
 
