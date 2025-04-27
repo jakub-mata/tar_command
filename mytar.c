@@ -275,7 +275,6 @@ read_header(
 		*EOF_reached = true;
 		return;
 	}
-	memset(header, 0, sizeof (*header));  /* Initialize header to zero */
 	read_char_based(fp, header->name, NAME_LENGTH);
 	header->mode = read_integer_based(fp, MODE_LENGTH);
 	header->uid = read_integer_based(fp, UID_LENGTH);
@@ -319,6 +318,11 @@ print_header(struct TarHeader *header)
 bool
 is_header_empty(struct TarHeader *header)
 {
+	/* This condition is long, however it will never change. We could
+	simplify it by comparing the header to an empty struct, but we
+	would have to wipe the struct after each reading, which we 
+	currently do not do for efficiency (we rely on the specfication
+	instead). */
 	if (header->name[0] == '\0' && header->mode == 0 && header->uid == 0 &&
 		header->gid == 0 && header->size == 0 && header->mtime == 0 &&
 		header->chksum == 0 && header->typeflag == '\0' &&
