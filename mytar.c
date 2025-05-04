@@ -463,6 +463,8 @@ extract_file(FILE *fp, struct TarHeader *header, size_t *record_counter)
 	if (remainder == 0)
 		remainder = RECORD_SIZE;
 	char *buffer = malloc(RECORD_SIZE);
+	if (buffer == NULL)
+		err(2, "Error allocating memory");
 	for (size_t i = 0; i < data_record_amount; ++i) {
 		*record_counter += 1;
 		if (i < data_record_amount - 1)
