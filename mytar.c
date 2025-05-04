@@ -301,7 +301,7 @@ read_header(
 	read_char_based(fp, header->prefix, PREFIX_LENGTH);
 
 	/* Skip traling header */
-	char void_buffer[TRAILING_PADDING];  /* Will be thrown away */
+	char void_buffer[TRAILING_PADDING + 1];  /* Will be thrown away */
 	read_char_based(fp, void_buffer, TRAILING_PADDING);
 
 	*record_counter += 1;
