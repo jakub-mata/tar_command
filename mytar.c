@@ -152,6 +152,7 @@ parse_arguments(int argc, char **argv)
 
 struct TarHeader
 {
+	/* Strings have +1 length to terminate with null byte*/
 	char name[NAME_LENGTH + 1];
 	size_t mode;
 	size_t uid;
